@@ -77,11 +77,12 @@
 <!-- ============ 4) 기록 (카메라 + 음성) ============ -->
 <section id="scr-capture" class="screen hidden">
   <div class="cap-head">
-    <h2>오늘의 순간 담기</h2>
+    <h2 id="cap-title">오늘의 순간 담기</h2>
     <button class="tbtn" id="btn-cap-back">돌아가기</button>
   </div>
 
   <div class="cap-card">
+    <div class="cap-datebar" id="cap-datebar"></div>
     <!-- 카메라 무대 -->
     <div class="cam-stage">
       <canvas id="cam-canvas"></canvas>
@@ -100,6 +101,10 @@
       <button class="chip on" data-filter="vintage">빈티지</button>
       <button class="chip" data-filter="colorpop">색감 강조</button>
       <button class="chip" data-filter="fisheye">볼록거울</button>
+      <button class="chip" data-filter="film">필름</button>
+      <button class="chip" data-filter="retro">폴더폰</button>
+      <button class="chip" data-filter="mono">흑백</button>
+      <button class="chip" data-filter="dreamy">몽환</button>
     </div>
 
     <!-- 촬영 -->
@@ -110,6 +115,12 @@
       </div>
       <button id="btn-shutter" aria-label="촬영"><span class="shutter-ring"></span></button>
       <button id="btn-retake" class="tbtn hidden">다시 찍기</button>
+    </div>
+
+    <!-- 갤러리에서 가져오기 (지나친 날 채우기) -->
+    <div class="gallery-row">
+      <button class="tbtn" id="btn-gallery">갤러리에서 사진·영상 가져오기</button>
+      <input type="file" id="gallery-input" accept="image/*,video/*" class="hidden">
     </div>
 
     <!-- 꾸미기 (촬영 후에만 표시) -->
@@ -187,6 +198,10 @@
       <label class="vlog-audio-row lbl">제목
         <input type="text" id="vlog-title" maxlength="24" placeholder="예) 7월의 기록">
       </label>
+      <label class="vlog-audio-row lbl">마무리 한마디
+        <input type="text" id="vlog-outro" maxlength="24" placeholder="이번 달도 수고했어">
+      </label>
+      <span class="lbl outro-note">영상 맨 끝에 나와요. 아래에 앱 이름(순간일기)이 작게 함께 표시돼요. 비우면 앱 이름만 나옵니다.</span>
       <div class="vlog-audio-row">
         <span class="lbl">전체 길이</span>
         <div class="mode-toggle" id="vlog-len">
@@ -206,6 +221,8 @@
         <select id="vlog-bgm" aria-label="배경음악 선택">
           <option value="piano">잔잔한 피아노 (기본 · 자체 제작)</option>
           <option value="musicbox">포근한 오르골 (기본 · 자체 제작)</option>
+          <option value="guitar">따뜻한 기타 (기본 · 자체 제작)</option>
+          <option value="lofi">로파이 앰비언트 (기본 · 자체 제작)</option>
           <option value="user">내 음원 파일 사용</option>
           <option value="none">배경음악 없음</option>
         </select>
@@ -241,9 +258,23 @@
     <p>모든 기록(사진·영상·글)은 <b>이 기기 안에만</b> 저장돼요. 인터넷으로 어디에도 전송되지 않아요. 다만 브라우저 데이터를 지우면 기록도 함께 사라지니, 소중한 달은 월말 브이로그로 저장해 두세요.</p>
   </div>
   <div class="set-card">
+    <h2>알림</h2>
+    <label class="lbl set-toggle"><input type="checkbox" id="set-remind"> 매일 기록 알림 받기</label>
+    <div class="set-row" id="remind-time-row">
+      <span class="lbl">알림 시간</span>
+      <input type="time" id="set-remind-time" value="21:00">
+    </div>
+    <p id="remind-note">정한 시간에 아직 오늘 기록이 없으면 알려드려요. 앱을 홈 화면에 설치하고 열어두면 가장 잘 동작해요. (기기·브라우저에 따라 알림 권한이 필요할 수 있어요.)</p>
+  </div>
+  <div class="set-card">
     <h2>소리</h2>
-    <label class="lbl set-toggle"><input type="checkbox" id="set-sound"> 촬영·페이지 넘김 효과음 켜기</label>
-    <p>모든 기본 음악·효과음은 외부 음원이 아니라 <b>앱이 직접 합성해 내는 소리</b>라서, 무료이고 상업적 이용에도 제한이 없어요.</p>
+    <label class="lbl set-toggle"><input type="checkbox" id="set-sound"> 버튼·촬영·페이지 효과음 켜기</label>
+    <div class="set-row">
+      <span class="lbl">효과음 음량</span>
+      <input type="range" id="set-volume" min="0" max="100" value="70">
+      <span class="lbl" id="volume-val">70</span>
+    </div>
+    <p>버튼 소리(비눗방울), 촬영음, 종이 넘기는 소리, 브이로그 배경음악·효과음은 모두 외부 음원이 아니라 <b>앱이 직접 합성해 내는 소리</b>예요. 무료이고 상업적 이용에도 제한이 없어요.</p>
   </div>
   <div class="set-card">
     <h2>데이터 관리</h2>
@@ -251,6 +282,15 @@
     <button class="tbtn danger" id="btn-wipe">모든 기록 지우기</button>
   </div>
 </section>
+
+<!-- 기록 알림 배너 -->
+<div id="reminder-banner">
+  <span id="reminder-text">오늘의 순간, 아직 안 남기셨어요. 지금 한 줄 어때요?</span>
+  <div class="reminder-btns">
+    <button class="tbtn primary" id="reminder-go">기록하기</button>
+    <button class="tbtn" id="reminder-dismiss">닫기</button>
+  </div>
+</div>
 
 <!-- 공통: 토스트 / 확인 모달 -->
 <div id="toast" role="status"></div>

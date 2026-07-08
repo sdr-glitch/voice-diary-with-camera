@@ -21,13 +21,26 @@
 ## UI 규칙
 
 - **장식용 이모티콘 금지**: 제목·버튼·라벨·토스트에 이모지를 넣지 말 것(스토어 대비 깔끔함). 단 **콘텐츠 선택용 이모지 피커는 허용** — 스티커 팔레트(꾸미기 기능), 날씨 칩. 기분은 텍스트 칩.
-- 페이지는 평면 종이(줄무늬·테두리 드리운 그림자 "커튼" 제거). 글이 밀려 보이지 않게 미디어→텍스트 자연 흐름.
+- 페이지는 평면 종이(줄무늬·테두리 드리운 그림자 "커튼" 제거). 글이 밀려 보이지 않게 미디어→텍스트 자연 흐름. **페이지 넘김 모션 없음**(소리만).
+
+## 소리 (전부 자체 합성 = 상업용 안전)
+
+- `playFx(name)`: shutter·flip(종이 사르륵 `paperNoise`)·chime·bubble(전체 버튼음)·mic(음성 버튼). UI 경로는 `soundOn()`+`fxVolume()`(설정 음량) 반영. 버튼 전체 비눗방울음은 document capture 리스너(shutter/mic·스티커는 제외).
+- BGM(`scheduleBgmBar`): piano·musicbox·guitar·lofi + 사용자 파일(user).
+
+## 알림
+
+- 로컬 전용(서버·푸시 없음): `scheduleReminder()`가 `remindTime`까지 setTimeout, 발화 시 오늘 기록 없으면 `#reminder-banner` + (권한 시)Notification. **앱이 열려 있을 때** 동작 — 설치 PWA 권장. 설정에서 on/off·시간.
 
 ## 저장 구조
 
 - IndexedDB `moment-diary` / store `entries` — `{ id, date(YYYY-MM-DD), ts, kind: photo|video|none, blob, thumb, filter, durMs, weather, mood, stickers:[{e,x,y,s}], text }`
   (스티커는 미디어에 굽지 않고 메타데이터로 저장 → 페이지에선 오버레이, 브이로그에선 캔버스에 그림)
 - 영상은 **길이 제한 없음**: 셔터로 녹화 시작/정지 토글(`startVideoRec`/`stopVideoRec`), `durMs` 저장. 녹화 중에도 캔버스가 갱신돼야 captureStream에 담김(`!(captured&&captured.blob)`일 때 draw).
+- localStorage(`momentDiary:`): sound(on/off)·volume(0~100)·remindOn·remindTime·outro.
+- **필터 8종**: none·vintage·colorpop·fisheye·film·retro(폴더폰: 저해상도 픽셀화+초록 LCD+스캔라인)·mono·dreamy. `CSS_FILTER`(ctx.filter)+수동 오버레이, retro는 축소→확대 픽셀화.
+- **날짜 채우기**: `captureDate`가 기록 대상 날짜. `openCaptureFor(date)`로 달력의 지난 날/오늘 진입. 갤러리 가져오기 `importFromGallery(file)`(사진은 필터 적용, 영상은 원본+메타 durMs).
+- **브이로그 폴라로이드**: `polaroidGeom/drawPolaroidFrame/drawMediaCover(zoom)/polaroidStickers/polaroidCaption`. 사진은 켄번즈(zoom 1→1.09), 영상은 그대로. 아웃트로는 `opts.outro`(수정·저장, 기본 `DEFAULT_OUTRO`) + `APP_NAME` 고정 소자막.
 - localStorage는 `momentDiary:` 접두사 (작은 상태만)
 - 전체 초기화는 IndexedDB 삭제 + `momentDiary:*` 키 삭제 둘 다 필요
 
@@ -38,7 +51,7 @@ NODE_PATH=$(npm root -g) PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node tests/sm
 ```
 
 - headless Chromium + `--use-fake-device-for-media-stream`(가짜 카메라)으로 전 구간 검증
-- **테스트 훅** `window.__diary`: `ready() getEntries() getPageIndex() show(id) flip(dir) saveEntry() deleteEntry(id) buildVlog(ym,onProg,{bgm,fx,title,targetSec,ids}) addEntry({date,text,weather,mood,filter,kind,dataURL,stickers,durMs}) camState()(recording 포함) testFilter(name) speechSupported() addSticker(emoji) getStickers() goCalendar(ym) jumpToEntry(idx) startVideoRec()/stopVideoRec()/isRecording() getClips()/moveClip(i,dir)/toggleClip(i,on)/setTarget(sec) bgmSample(name) userAudioLoaded() _lastVlogAudioTracks`
+- **테스트 훅** `window.__diary`: `ready() getEntries() getPageIndex() show(id) flip(dir) saveEntry() deleteEntry(id) buildVlog(ym,onProg,{bgm,fx,title,outro,targetSec,ids}) addEntry({...,mood,durMs}) camState()(recording 포함) testFilter(name) speechSupported() addSticker/getStickers goCalendar(ym) jumpToEntry(idx) openCaptureFor(date)/getCaptureDate() importFile(file)/setFilter(f) startVideoRec/stopVideoRec/isRecording getClips/moveClip/toggleClip/setTarget bgmSample/fxSample/bubbleSample reminder{on,time,show,schedule} renderPolaroidTest(dataURL) userAudioLoaded _lastVlogAudioTracks`
 - 큰 기록은 IndexedDB에 있으므로 localStorage 직접 읽기/시드 금지 — 훅 사용
 - 음성 받아쓰기는 headless에서 실제 변환 불가 → 안내 문구 + 직접 입력 경로만 검증
 

@@ -603,6 +603,46 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-
 #btn-new { bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
 .screen { padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px)); }
 
+/* ============================================================
+   10) 추가 기능 (날짜 채우기·갤러리·알림·음량)
+   ============================================================ */
+/* 기록 화면 날짜 바 */
+.cap-datebar {
+  font-size: 13px; color: var(--ink-soft);
+  background: var(--paper-2); border-radius: 8px; padding: 7px 12px; text-align: center;
+}
+/* 갤러리에서 가져오기 */
+.gallery-row { display: flex; }
+.gallery-row .tbtn { flex: 1; text-align: center; padding: 10px; }
+
+/* 달력: 모든 지난 날 눌러서 채우기 / 미래는 흐리게 */
+button.cal-day.empty { cursor: pointer; color: var(--ink); background: transparent; }
+button.cal-day.empty:hover { background: var(--paper-2); }
+.cal-day.future { color: var(--ink-dim); opacity: .5; }
+
+/* 설정 행 */
+.set-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.set-row input[type="time"] {
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px;
+  font-size: 14px; background: #fffdf7; color: var(--ink);
+}
+.set-row input[type="range"] { flex: 1; min-width: 140px; accent-color: var(--accent); }
+#remind-note, .outro-note { font-size: 12px; color: var(--ink-soft); line-height: 1.7; }
+
+/* 기록 알림 배너 */
+#reminder-banner {
+  position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px));
+  transform: translateX(-50%) translateY(-160%);
+  width: min(440px, 94vw); z-index: 95;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: var(--shadow); padding: 14px 16px;
+  display: flex; align-items: center; gap: 12px; justify-content: space-between;
+  transition: transform .35s ease; flex-wrap: wrap;
+}
+#reminder-banner.on { transform: translateX(-50%) translateY(0); }
+#reminder-text { font-size: 13px; color: var(--ink); flex: 1; min-width: 160px; line-height: 1.6; }
+.reminder-btns { display: flex; gap: 8px; }
+
 /* ---------- 모바일: 한 페이지씩 ---------- */
 @media (max-width: 720px) {
   .book { width: min(440px, 96vw); }

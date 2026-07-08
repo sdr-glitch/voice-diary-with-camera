@@ -60,14 +60,20 @@ function ok(cond, name) {
   await page.click('#btn-cap-back');
 
   console.log('\n[5] 필터 단위 검증');
-  const f = await page.evaluate(() => ({
-    none: window.__diary.testFilter('none'), vintage: window.__diary.testFilter('vintage'),
-    colorpop: window.__diary.testFilter('colorpop'), fisheye: window.__diary.testFilter('fisheye'),
-  }));
+  const names = ['none', 'vintage', 'colorpop', 'fisheye', 'film', 'retro', 'mono', 'dreamy'];
+  const f = await page.evaluate((ns) => {
+    const o = {}; ns.forEach((n) => { o[n] = window.__diary.testFilter(n); }); return o;
+  }, names);
   const diff = (a, b) => a.reduce((s, v, i) => s + Math.abs(v - b[i]), 0);
   ok(diff(f.none.q1, f.vintage.q1) > 10, '빈티지 필터가 색을 바꿈');
   ok(diff(f.none.q1, f.colorpop.q1) > 10, '색감강조 필터가 색을 바꿈');
   ok(diff(f.none.corner, f.fisheye.corner) > 10, '볼록거울 필터가 왜곡함');
+  ok(diff(f.none.q1, f.film.q1) > 8, '필름 필터가 색을 바꿈');
+  ok(diff(f.none.q1, f.retro.q1) > 8, '폴더폰(레트로) 필터가 색을 바꿈');
+  ok(Math.abs(f.mono.q1[0] - f.mono.q1[1]) < 6 && Math.abs(f.mono.q1[1] - f.mono.q1[2]) < 6, '흑백 필터는 R=G=B');
+  ok(diff(f.none.q1, f.dreamy.q1) > 5, '몽환 필터가 색을 바꿈');
+  // 필터끼리 서로 다름(겹치지 않음)
+  ok(diff(f.vintage.q1, f.film.q1) > 8 && diff(f.vintage.q1, f.mono.q1) > 8, '빈티지·필름·흑백이 서로 다름');
 
   console.log('\n[6] 빈 페이지 클릭 → 기록 화면 (책에 기록이 없을 때)');
   await page.evaluate(() => window.__diary.show('scr-book'));
@@ -241,7 +247,97 @@ function ok(cond, name) {
   await page.waitForSelector('#scr-cover:not(.hidden)');
   ok((await page.evaluate(() => window.__diary.getEntries())).length === 0, '전체 삭제');
 
-  console.log('\n[16] PWA 구성');
+  console.log('\n[16] 달력에서 지난 날 채우기 (아무 날짜나 클릭)');
+  await page.evaluate(() => window.__diary.goCalendar('2026-05'));
+  ok(await page.isVisible('#scr-cal'), '5월 달력 표시');
+  ok((await page.$$eval('.cal-day.empty', (n) => n.length)) > 0, '지난 날들이 눌러서 채울 수 있게 표시');
+  ok((await page.$$eval('.cal-day.future', (n) => n.length)) === 0, '(과거 달이라 미래 칸 없음)');
+  await page.click('.cal-day.empty[data-date="2026-05-10"]');
+  ok(await page.isVisible('#scr-capture'), '지난 날 누르면 기록 화면으로');
+  ok((await page.textContent('#cap-datebar')).includes('5월 10일'), '기록 화면이 그날짜를 표시');
+  ok(await page.evaluate(() => window.__diary.getCaptureDate()) === '2026-05-10', 'captureDate가 지난 날로 설정');
+  await page.fill('#diary-text', '오월의 지난 날을 채웠다.');
+  await page.click('.mchip[data-mood="평온"]');
+  await page.click('#btn-save-entry');
+  await page.waitForSelector('#scr-book:not(.hidden)');
+  let filled = (await page.evaluate(() => window.__diary.getEntries())).find((e) => e.text.includes('오월의 지난 날'));
+  ok(filled && filled.date === '2026-05-10', `지난 날짜(${filled ? filled.date : '?'})로 저장됨`);
+
+  console.log('\n[17] 갤러리에서 사진 가져오기');
+  await page.evaluate(() => window.__diary.openCaptureFor('2026-05-11'));
+  await page.waitForSelector('#scr-capture:not(.hidden)');
+  await page.evaluate(async (png) => {
+    const blob = await (await fetch(png)).blob();
+    await window.__diary.importFile(blob);
+  }, PNG);
+  await page.waitForFunction(() => window.__diary.camState().captured === 'photo', null, { timeout: 5000 });
+  ok(await page.isVisible('#cap-preview-img'), '갤러리 사진 미리보기 표시');
+  await page.click('#btn-save-entry');
+  await page.waitForSelector('#scr-book:not(.hidden)');
+  const gal = (await page.evaluate(() => window.__diary.getEntries())).find((e) => e.date === '2026-05-11');
+  ok(gal && gal.kind === 'photo' && gal.blobSize > 100, '갤러리 사진이 그날에 저장');
+
+  console.log('\n[18] 소리 — 새 배경음악 2종 + 효과음(비눗방울·마이크·종이넘김)');
+  ok(await page.evaluate(() => window.__diary.bgmSample('guitar')) > 0.0005, '따뜻한 기타 실제 소리');
+  ok(await page.evaluate(() => window.__diary.bgmSample('lofi')) > 0.0005, '로파이 앰비언트 실제 소리');
+  ok(await page.evaluate(() => window.__diary.fxSample('bubble')) > 0.0005, '비눗방울 버튼음 실제 소리');
+  ok(await page.evaluate(() => window.__diary.fxSample('mic')) > 0.0005, '마이크 버튼음 실제 소리');
+  ok(await page.evaluate(() => window.__diary.fxSample('flip')) > 0.0005, '종이 넘김 소리 실제 소리');
+
+  console.log('\n[19] 음량 설정 저장 + 페이지 넘김 모션 제거 확인');
+  await page.evaluate(() => window.__diary.show('scr-settings'));
+  await page.evaluate(() => { const v = document.querySelector('#set-volume'); v.value = 30; v.dispatchEvent(new Event('change')); });
+  ok(await page.evaluate(() => localStorage.getItem('momentDiary:volume')) === '30', '효과음 음량 저장');
+  await page.evaluate(() => window.__diary.show('scr-book'));
+  const pageOK = await page.evaluate(async () => {
+    const before = window.__diary.getPageIndex();
+    await window.__diary.flip(1);
+    // 넘김 애니메이션 클래스가 남지 않아야 함(모션 제거)
+    const animating = document.querySelector('.page.flip-out, .page.flip-in') !== null;
+    return { moved: window.__diary.getPageIndex() !== before || before === 0, animating };
+  });
+  ok(!pageOK.animating, '페이지 넘김 애니메이션 없음(모션 제거)');
+
+  console.log('\n[20] 브이로그 마무리 한마디(수정·저장) + 폴라로이드/압축 빌드');
+  await page.evaluate(() => window.__diary.show('scr-vlog'));
+  await page.selectOption('#vlog-month', '2026-05');
+  await page.waitForTimeout(150);
+  await page.fill('#vlog-outro', '오월아 고마워');
+  await page.selectOption('#vlog-bgm', 'guitar');
+  await page.click('#btn-make-vlog');
+  await page.waitForSelector('#vlog-result.on', { timeout: 40000 });
+  ok(await page.evaluate(() => localStorage.getItem('momentDiary:outro')) === '오월아 고마워', '마무리 한마디 저장(다음에도 기억)');
+  const vsize = await page.evaluate(async () => (await (await fetch(document.querySelector('#vlog-video').src)).blob()).size);
+  ok(vsize > 5000, `폴라로이드 브이로그 생성 (${vsize}B)`);
+  // 앱 이름은 항상 들어가고, 빈 한마디면 앱 이름만
+  const okOutro = await page.evaluate(async () => {
+    const b = await window.__diary.buildVlog('2026-05', () => {}, { outro: '', targetSec: 30, bgm: 'none' });
+    return b.size > 3000;
+  });
+  ok(okOutro, '마무리 한마디를 비워도(앱 이름만) 정상 생성');
+  // 폴라로이드 프레임이 실제로 그려지는지(흰 프레임 여백 vs 크림 배경)
+  const pol = await page.evaluate((png) => window.__diary.renderPolaroidTest(png), PNG);
+  const white = pol.frameBottom[0] > 240 && pol.frameBottom[1] > 240 && pol.frameBottom[2] > 235;
+  const cream = pol.outside[0] > 210 && pol.outside[0] < 250 && pol.outside[2] < pol.outside[0];
+  ok(white, `폴라로이드 흰 프레임 여백 렌더 (rgb ${pol.frameBottom.join(',')})`);
+  ok(cream, `프레임 밖은 크림색 배경 (rgb ${pol.outside.join(',')})`);
+
+  console.log('\n[21] 전체 삭제 후 기록 알림 배너');
+  await page.evaluate(() => window.__diary.show('scr-settings'));
+  await page.click('#btn-wipe');
+  await page.waitForSelector('#modal-back.on');
+  await page.click('#modal-ok');
+  await page.waitForSelector('#scr-cover:not(.hidden)');
+  ok((await page.evaluate(() => window.__diary.getEntries())).length === 0, '전체 삭제');
+  await page.evaluate(() => window.__diary.reminder.show());
+  ok(await page.isVisible('#reminder-banner.on'), '오늘 기록 없으면 알림 배너 표시');
+  await page.click('#reminder-go');
+  ok(await page.isVisible('#scr-capture'), '배너의 기록하기 → 기록 화면');
+  await page.evaluate(async () => { await window.__diary.addEntry({ text: '오늘 기록' }); });
+  await page.evaluate(() => window.__diary.reminder.show());
+  ok(!(await page.isVisible('#reminder-banner.on')), '오늘 이미 기록했으면 배너 안 뜸');
+
+  console.log('\n[22] PWA 구성');
   const root = path.resolve(__dirname, '..');
   const mf = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   ok(mf.name && mf.icons.length >= 2 && mf.display === 'standalone', 'manifest 필수 필드');
