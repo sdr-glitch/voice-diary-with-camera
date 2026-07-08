@@ -19,6 +19,7 @@
 <!-- ============ 1) 표지 ============ -->
 <section id="scr-cover" class="screen">
   <button class="cover-book" id="btn-open-book" aria-label="일기장 펼치기">
+    <span class="stitch" aria-hidden="true"></span>
     <div class="cover-emblem">📖</div>
     <div class="cover-title">순간일기</div>
     <div class="cover-sub">목소리와 풍경으로 쓰는 하루</div>
@@ -32,6 +33,7 @@
   <div class="book-top">
     <h1>📖 순간일기</h1>
     <div class="top-btns">
+      <button class="tbtn" id="btn-cal">📅 달력</button>
       <button class="tbtn" id="btn-go-vlog">🎬 월말 브이로그</button>
       <button class="tbtn" id="btn-go-settings">⚙️</button>
       <button class="tbtn" id="btn-close-book">표지로</button>
@@ -70,6 +72,7 @@
         <p id="cam-msg-text">카메라를 준비하고 있어요…</p>
       </div>
       <div class="rec-dot" id="rec-dot">녹화 중</div>
+      <div id="sticker-layer"></div>
     </div>
 
     <!-- 필터 -->
@@ -88,6 +91,24 @@
       </div>
       <button id="btn-shutter" aria-label="촬영">📸</button>
       <button id="btn-retake" class="tbtn hidden">다시 찍기</button>
+    </div>
+
+    <!-- 꾸미기 (촬영 후에만 표시) -->
+    <div id="deco-box" class="hidden">
+      <span class="lbl">🎀 꾸미기 — 스티커를 눌러 붙이고, 손가락으로 끌어서 옮겨보세요</span>
+      <div class="chip-row" id="sticker-palette">
+        <button class="schip">⭐</button><button class="schip">✨</button>
+        <button class="schip">💖</button><button class="schip">🌸</button>
+        <button class="schip">🌈</button><button class="schip">☁️</button>
+        <button class="schip">🍀</button><button class="schip">🐻</button>
+        <button class="schip">😊</button><button class="schip">🎈</button>
+        <button class="schip">🔥</button><button class="schip">🎵</button>
+      </div>
+      <div class="deco-controls hidden" id="deco-controls">
+        <button class="tbtn" id="stk-bigger">➕ 크게</button>
+        <button class="tbtn" id="stk-smaller">➖ 작게</button>
+        <button class="tbtn danger" id="stk-delete">🗑️ 이 스티커 빼기</button>
+      </div>
     </div>
 
     <!-- 음성 → 텍스트 -->
@@ -128,6 +149,23 @@
       <select id="vlog-month" aria-label="브이로그를 만들 달 선택"></select>
       <button class="tbtn primary" id="btn-make-vlog">만들기</button>
     </div>
+    <div class="vlog-audio">
+      <div class="vlog-audio-row">
+        <span class="lbl">🎵 배경음악</span>
+        <select id="vlog-bgm" aria-label="배경음악 선택">
+          <option value="piano">🎹 잔잔한 피아노 (기본 · 자체 제작)</option>
+          <option value="musicbox">🎐 포근한 오르골 (기본 · 자체 제작)</option>
+          <option value="user">📁 내 음원 파일 사용</option>
+          <option value="none">배경음악 없음</option>
+        </select>
+      </div>
+      <div class="vlog-audio-row hidden" id="user-audio-row">
+        <input type="file" id="vlog-user-audio" accept="audio/*">
+        <span id="user-audio-name" class="lbl"></span>
+      </div>
+      <label class="vlog-audio-row lbl"><input type="checkbox" id="vlog-fx" checked> 장면이 바뀔 때 작은 효과음 넣기 (자체 제작)</label>
+      <p class="desc">기본 배경음악과 효과음은 <b>이 앱이 그 자리에서 직접 만들어내는 소리</b>예요. 남의 음원을 쓰지 않으므로 저작권 걱정 없이 상업적으로도 자유롭게 쓸 수 있어요. 내 음원 파일을 쓸 때는 그 음원의 이용 범위를 꼭 확인해 주세요.</p>
+    </div>
     <div id="vlog-progress">
       <div class="bar-wrap"><div id="vlog-bar"></div></div>
       <span id="vlog-step"></span>
@@ -150,11 +188,30 @@
     <p>모든 기록(사진·영상·글)은 <b>이 기기 안에만</b> 저장돼요. 인터넷으로 어디에도 전송되지 않아요. 다만 브라우저 데이터를 지우면 기록도 함께 사라지니, 소중한 달은 월말 브이로그로 저장해 두세요.</p>
   </div>
   <div class="set-card">
+    <h2>소리</h2>
+    <label class="lbl set-toggle"><input type="checkbox" id="set-sound"> 촬영·페이지 넘김 효과음 켜기</label>
+    <p>모든 기본 음악·효과음은 외부 음원이 아니라 <b>앱이 직접 합성해 내는 소리</b>라서, 무료이고 상업적 이용에도 제한이 없어요.</p>
+  </div>
+  <div class="set-card">
     <h2>데이터 관리</h2>
     <p id="set-stats"></p>
     <button class="tbtn danger" id="btn-wipe">🗑️ 모든 기록 지우기</button>
   </div>
 </section>
+
+<!-- 달력 모달 -->
+<div id="cal-back">
+  <div class="cal-box">
+    <div class="cal-head">
+      <button class="nav-arrow sm" id="cal-prev" aria-label="이전 달">◀</button>
+      <span id="cal-title"></span>
+      <button class="nav-arrow sm" id="cal-next" aria-label="다음 달">▶</button>
+      <button class="tbtn" id="cal-close">닫기</button>
+    </div>
+    <div class="cal-grid" id="cal-grid"></div>
+    <p class="cal-hint">🟠 점이 있는 날을 누르면 그날 일기로 바로 넘어가요</p>
+  </div>
+</div>
 
 <!-- 공통: 토스트 / 확인 모달 -->
 <div id="toast" role="status"></div>

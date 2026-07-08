@@ -34,6 +34,14 @@ let recording = false;
 let speech = null;
 let speechOn = false;
 
+// 꾸미기(스티커) 상태 — {e:이모지, x/y:0~1 상대좌표, s:가로폭 대비 크기}
+let capStickers = [];
+let selSticker = -1;
+
+// 사용자 배경음악 파일 (브이로그용)
+let userAudioData = null; // ArrayBuffer
+let userAudioName = '';
+
 const mediaURLCache = new Map();  // entry.id -> objectURL (세션 캐시)
 
 const $ = (sel) => document.querySelector(sel);
@@ -72,6 +80,90 @@ function confirmModal(text) {
     $('#modal-ok').onclick = () => done(true);
     $('#modal-cancel').onclick = () => done(false);
   });
+}
+
+/* ==================== 소리 (전부 자체 합성 — 외부 음원 없음 = 저작권 안전) ==================== */
+let AC = null;
+function audioCtx() {
+  if (!AC) {
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; }
+  }
+  if (AC.state === 'suspended') AC.resume().catch(() => {});
+  return AC;
+}
+function soundOn() { return localStorage.getItem(LS_PREFIX + 'sound') !== 'off'; }
+
+/** 감쇠하는 단음 하나 */
+function tone(ctx, dest, t, freq, dur, opt = {}) {
+  const { type = 'sine', gain = 0.12 } = opt;
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(dest);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+/** 짧은 노이즈 (셔터·책장 소리용) */
+function noiseBurst(ctx, dest, t, dur, gain, freq) {
+  const len = Math.max(1, Math.ceil(ctx.sampleRate * dur));
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 0.8;
+  const g = ctx.createGain(); g.gain.value = gain;
+  src.connect(f); f.connect(g); g.connect(dest);
+  src.start(t);
+}
+/** UI 효과음 (설정에서 켜고 끔) */
+function playFx(name, ctx = null, dest = null) {
+  const ui = !ctx;
+  if (ui && !soundOn()) return;
+  if (ui) { ctx = audioCtx(); if (!ctx) return; dest = ctx.destination; }
+  try {
+    const t = ctx.currentTime + 0.02;
+    if (name === 'shutter') {
+      noiseBurst(ctx, dest, t, 0.05, 0.25, 2400);
+      noiseBurst(ctx, dest, t + 0.07, 0.05, 0.18, 1200);
+    } else if (name === 'flip') {
+      noiseBurst(ctx, dest, t, 0.16, 0.14, 900);
+    } else if (name === 'chime') {
+      tone(ctx, dest, t, 880, 0.35, { gain: 0.07 });
+      tone(ctx, dest, t + 0.09, 1318.5, 0.4, { gain: 0.05 });
+    }
+  } catch (e) { /* 소리는 실패해도 앱 동작에 영향 없음 */ }
+}
+/** 배경음악 한 소절을 t0부터 예약하고 소절 길이(초)를 반환 */
+function scheduleBgmBar(ctx, dest, name, t0) {
+  if (name === 'piano') {
+    // C — G — Am — F, 72bpm 아르페지오 + 낮은 패드
+    const chords = [
+      [261.6, 329.6, 392.0], [196.0, 246.9, 392.0],
+      [220.0, 261.6, 329.6], [174.6, 220.0, 261.6],
+    ];
+    const beat = 60 / 72;
+    chords.forEach((ch, ci) => {
+      const base = t0 + ci * beat * 2;
+      ch.forEach((f) => tone(ctx, dest, base, f / 2, beat * 2.1, { type: 'triangle', gain: 0.028 }));
+      for (let i = 0; i < 4; i++) {
+        tone(ctx, dest, base + (i * beat) / 2, ch[i % 3] * (i === 3 ? 2 : 1), 0.55, { gain: 0.055 });
+      }
+    });
+    return beat * 8;
+  }
+  if (name === 'musicbox') {
+    // 오르골풍 펜타토닉 멜로디 + 한 옥타브 위 반짝임
+    const notes = [523.3, 659.3, 784.0, 880.0, 784.0, 659.3, 587.3, 523.3];
+    const step = 0.44;
+    notes.forEach((f, i) => {
+      tone(ctx, dest, t0 + i * step, f, 1.1, { gain: 0.05 });
+      tone(ctx, dest, t0 + i * step, f * 2, 0.7, { gain: 0.018 });
+    });
+    return notes.length * step;
+  }
+  return 1;
 }
 
 /* ==================== IndexedDB ==================== */
@@ -153,11 +245,13 @@ function pageHTML(e, num) {
       <p>아직 이 페이지는 비어 있어요.<br>오른쪽 아래 ✍️ 버튼으로<br>오늘의 순간을 담아보세요.</p></div>`;
   }
   const d = parseDate(e.date);
+  const stk = (e.stickers || []).map((s) =>
+    `<span class="stk" data-s="${s.s}" style="left:${s.x * 100}%;top:${s.y * 100}%">${s.e}</span>`).join('');
   let media = '';
   if (e.kind === 'photo' && e.blob) {
-    media = `<div class="pg-media"><img src="${mediaURL(e)}" alt="일기 사진"><span class="media-tag">${filterLabel(e.filter)}</span></div>`;
+    media = `<div class="pg-media"><img src="${mediaURL(e)}" alt="일기 사진">${stk}<span class="media-tag">${filterLabel(e.filter)}</span></div>`;
   } else if (e.kind === 'video' && e.blob) {
-    media = `<div class="pg-media"><video src="${mediaURL(e)}" muted loop autoplay playsinline></video><span class="media-tag">🎥 ${CLIP_SEC}초 · ${filterLabel(e.filter)}</span></div>`;
+    media = `<div class="pg-media"><video src="${mediaURL(e)}" muted loop autoplay playsinline></video>${stk}<span class="media-tag">🎥 ${CLIP_SEC}초 · ${filterLabel(e.filter)}</span></div>`;
   }
   return `
     <div class="pg-date"><span class="pg-weather">${e.weather || '📝'}</span>
@@ -194,6 +288,7 @@ function renderSpread() {
     L.innerHTML = pageHTML(entries[pageIndex], pageIndex + 1);
     R.innerHTML = pageHTML(entries[pageIndex + 1], pageIndex + 2);
   }
+  sizePageStickers();
   const total = Math.max(entries.length, 1);
   $('#pg-indicator').textContent = isMobile()
     ? `${Math.min(pageIndex + 1, total)} / ${total}쪽`
@@ -202,12 +297,23 @@ function renderSpread() {
   $('#btn-next').disabled = pageIndex >= maxIndex();
 }
 
+/** 페이지 스티커 크기를 컨테이너 폭 기준으로 계산 (CSS만으론 컨테이너 비례 폰트가 안 됨) */
+function sizePageStickers() {
+  $$('.pg-media').forEach((box) => {
+    const w = box.clientWidth || 300;
+    box.querySelectorAll('.stk').forEach((el) => {
+      el.style.fontSize = Math.round(parseFloat(el.dataset.s || 0.15) * w) + 'px';
+    });
+  });
+}
+
 function flip(dir) {
   if (flipping) return Promise.resolve(false);
   const st = step();
   const target = pageIndex + dir * st;
   if (target < 0 || target > maxIndex()) return Promise.resolve(false);
   flipping = true;
+  playFx('flip');
   // 책등에 가까운 페이지가 넘어가는 연출 (scaleX 2D 변환)
   const movingEl = (dir > 0 || isMobile()) ? $('#page-right') : $('#page-left');
   movingEl.classList.add('flip-out');
@@ -384,6 +490,7 @@ function stopCamera() {
 function resetCaptureUI() {
   captured = null;
   recording = false;
+  clearStickers();
   $('#cap-preview-img').classList.add('hidden');
   $('#cap-preview-video').classList.add('hidden');
   $('#cam-canvas').classList.remove('hidden');
@@ -412,6 +519,7 @@ function pickMime() {
 async function shutter() {
   if (!camStream || recording || captured) return;
   const cv = $('#cam-canvas');
+  playFx('shutter');
   if (camMode === 'photo') {
     const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.92));
     captured = { kind: 'photo', blob, thumb: thumbFrom(cv), filter: camFilter };
@@ -452,7 +560,9 @@ async function shutter() {
 function afterCapture() {
   $('#btn-shutter').classList.add('hidden');
   $('#btn-retake').classList.remove('hidden');
-  toast(camMode === 'photo' ? '찰칵! 마음에 들면 아래에 느낌을 남겨보세요 🎙️' : `${CLIP_SEC}초 순간을 담았어요 🎥`);
+  $('#deco-box').classList.remove('hidden');
+  document.querySelector('.cam-stage').classList.add('decorating');
+  toast(camMode === 'photo' ? '찰칵! 스티커로 꾸미거나 아래에 느낌을 남겨보세요 🎙️' : `${CLIP_SEC}초 순간을 담았어요 🎥 스티커로 꾸며보세요`);
 }
 function retake() {
   const img = $('#cap-preview-img'), pv = $('#cap-preview-video');
@@ -460,9 +570,78 @@ function retake() {
   if (pv.src) URL.revokeObjectURL(pv.src);
   img.classList.add('hidden'); pv.classList.add('hidden'); pv.removeAttribute('src');
   captured = null;
+  clearStickers();
   $('#cam-canvas').classList.remove('hidden');
   $('#btn-shutter').classList.remove('hidden');
   $('#btn-retake').classList.add('hidden');
+}
+
+/* ==================== 꾸미기 (스티커) ==================== */
+function clearStickers() {
+  capStickers = [];
+  selSticker = -1;
+  const layer = $('#sticker-layer');
+  if (layer) layer.innerHTML = '';
+  const box = $('#deco-box');
+  if (box) box.classList.add('hidden');
+  const stage = document.querySelector('.cam-stage');
+  if (stage) stage.classList.remove('decorating');
+  const ctrl = $('#deco-controls');
+  if (ctrl) ctrl.classList.add('hidden');
+}
+function renderStickerLayer() {
+  const layer = $('#sticker-layer');
+  const w = layer.clientWidth || 400;
+  layer.innerHTML = capStickers.map((s, i) =>
+    `<span class="stk ${i === selSticker ? 'sel' : ''}" data-i="${i}"
+       style="left:${s.x * 100}%;top:${s.y * 100}%;font-size:${Math.round(s.s * w)}px">${s.e}</span>`).join('');
+  $('#deco-controls').classList.toggle('hidden', selSticker < 0);
+}
+function addSticker(emoji) {
+  if (!captured) { toast('먼저 사진이나 영상을 찍은 다음 꾸밀 수 있어요 📸'); return; }
+  capStickers.push({ e: emoji, x: 0.5, y: 0.5, s: 0.16 });
+  selSticker = capStickers.length - 1;
+  renderStickerLayer();
+}
+function bindStickerDrag() {
+  const layer = $('#sticker-layer');
+  let dragI = -1, moved = false;
+  layer.addEventListener('pointerdown', (ev) => {
+    const el = ev.target.closest('.stk');
+    if (!el) { selSticker = -1; renderStickerLayer(); return; }
+    dragI = Number(el.dataset.i);
+    selSticker = dragI;
+    moved = false;
+    renderStickerLayer();
+    layer.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  });
+  layer.addEventListener('pointermove', (ev) => {
+    if (dragI < 0) return;
+    const r = layer.getBoundingClientRect();
+    const s = capStickers[dragI];
+    if (!s) return;
+    s.x = Math.min(0.97, Math.max(0.03, (ev.clientX - r.left) / r.width));
+    s.y = Math.min(0.97, Math.max(0.03, (ev.clientY - r.top) / r.height));
+    moved = true;
+    const el = layer.querySelector(`.stk[data-i="${dragI}"]`);
+    if (el) { el.style.left = s.x * 100 + '%'; el.style.top = s.y * 100 + '%'; }
+  });
+  const end = () => { dragI = -1; if (moved) renderStickerLayer(); };
+  layer.addEventListener('pointerup', end);
+  layer.addEventListener('pointercancel', end);
+}
+function resizeSticker(f) {
+  const s = capStickers[selSticker];
+  if (!s) return;
+  s.s = Math.min(0.5, Math.max(0.06, s.s * f));
+  renderStickerLayer();
+}
+function deleteSticker() {
+  if (selSticker < 0) return;
+  capStickers.splice(selSticker, 1);
+  selSticker = -1;
+  renderStickerLayer();
 }
 
 /* ==================== 음성 → 텍스트 ==================== */
@@ -537,6 +716,7 @@ async function saveEntry() {
     thumb: captured ? captured.thumb : null,
     filter: captured ? captured.filter : 'none',
     weather: weatherBtn ? weatherBtn.dataset.weather : '',
+    stickers: captured ? capStickers.slice() : [],
     text,
   };
   await dbPut(entry);
@@ -611,6 +791,16 @@ function vlogCaption(ctx, W, H, e) {
     ctx.fillText(line, 26, H - 26);
   }
 }
+function vlogStickers(ctx, W, H, e) {
+  (e.stickers || []).forEach((s) => {
+    ctx.save();
+    ctx.font = `${Math.max(10, Math.round(s.s * W))}px "Apple SD Gothic Neo", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(s.e, s.x * W, s.y * H);
+    ctx.restore();
+  });
+}
 function vlogTitleSlide(ctx, W, H, title, sub) {
   ctx.fillStyle = '#2b241c';
   ctx.fillRect(0, 0, W, H);
@@ -641,11 +831,13 @@ function blobToImage(blobOrDataURL) {
   });
 }
 
-async function buildVlog(ym, onProg = () => {}) {
+async function buildVlog(ym, onProg = () => {}, audioOpt = {}) {
   const list = entries.filter((e) => e.date.startsWith(ym));
   if (!list.length) throw new Error('empty-month');
   const mime = pickMime();
   if (!mime) throw new Error('no-recorder');
+  const bgm = audioOpt.bgm || 'none';
+  const fxOn = !!audioOpt.fx;
   const [y, m] = ym.split('-').map(Number);
   const lastDay = new Date(y, m, 0).getDate();
   const W = 720, H = 540;
@@ -653,7 +845,41 @@ async function buildVlog(ym, onProg = () => {}) {
   cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d', { willReadFrequently: true });
 
-  const stream = cv.captureStream(30);
+  // 소리 트랙 (배경음악·전환 효과음 — 전부 자체 합성, 실패해도 무음으로 계속)
+  let acx = null, adest = null, bgmTimer = 0;
+  if (bgm !== 'none' || fxOn) {
+    try {
+      acx = new (window.AudioContext || window.webkitAudioContext)();
+      await acx.resume().catch(() => {});
+      adest = acx.createMediaStreamDestination();
+      if (bgm === 'user') {
+        if (!userAudioData) throw new Error('no-user-audio');
+        const buf = await acx.decodeAudioData(userAudioData.slice(0));
+        const src = acx.createBufferSource();
+        src.buffer = buf; src.loop = true;
+        const g = acx.createGain(); g.gain.value = 0.55;
+        src.connect(g); g.connect(adest);
+        src.start();
+      } else if (bgm !== 'none') {
+        // 소절 단위 예약 스케줄러 — 영상 길이를 몰라도 계속 이어짐
+        let nextBar = acx.currentTime + 0.05;
+        const pump = () => {
+          while (nextBar < acx.currentTime + 3) nextBar += scheduleBgmBar(acx, adest, bgm, nextBar);
+        };
+        pump();
+        bgmTimer = setInterval(pump, 500);
+      }
+    } catch (err) {
+      if (err.message === 'no-user-audio') { if (acx) acx.close().catch(() => {}); throw err; }
+      acx = null; adest = null; // 소리 실패 → 무음 브이로그로 진행
+    }
+  }
+
+  const vstream = cv.captureStream(30);
+  const stream = (adest && adest.stream.getAudioTracks().length)
+    ? new MediaStream([...vstream.getVideoTracks(), ...adest.stream.getAudioTracks()])
+    : vstream;
+  window.__diary._lastVlogAudioTracks = stream.getAudioTracks().length;
   const rec = new MediaRecorder(stream, { mimeType: mime });
   const chunks = [];
   rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
@@ -676,11 +902,12 @@ async function buildVlog(ym, onProg = () => {}) {
   for (let i = 0; i < list.length; i++) {
     const e = list[i];
     onProg(i + 1, list.length + 2, `${fmtDateKo(e.date)}의 순간을 이어 붙이는 중…`);
+    if (fxOn && acx) playFx('chime', acx, adest); // 장면 전환 효과음
     try {
       if (e.kind === 'video' && e.blob) {
         const v = await loadVideoBlob(e.blob);
         await v.play().catch(() => {});
-        drawFn = () => { drawCover(ctx, v, v.videoWidth || W, v.videoHeight || H, W, H); vlogCaption(ctx, W, H, e); };
+        drawFn = () => { drawCover(ctx, v, v.videoWidth || W, v.videoHeight || H, W, H); vlogStickers(ctx, W, H, e); vlogCaption(ctx, W, H, e); };
         await Promise.race([
           new Promise((r) => { v.onended = r; }),
           sleep(VLOG_CLIP_MS),
@@ -689,7 +916,7 @@ async function buildVlog(ym, onProg = () => {}) {
         URL.revokeObjectURL(v.src);
       } else if (e.kind === 'photo' && e.blob) {
         const img = await blobToImage(e.blob);
-        drawFn = () => { drawCover(ctx, img, img.naturalWidth, img.naturalHeight, W, H); vlogCaption(ctx, W, H, e); };
+        drawFn = () => { drawCover(ctx, img, img.naturalWidth, img.naturalHeight, W, H); vlogStickers(ctx, W, H, e); vlogCaption(ctx, W, H, e); };
         await sleep(VLOG_PHOTO_MS);
         URL.revokeObjectURL(img.src);
       } else {
@@ -720,6 +947,8 @@ async function buildVlog(ym, onProg = () => {}) {
   running = false;
   rec.stop();
   await stopped;
+  if (bgmTimer) clearInterval(bgmTimer);
+  if (acx) acx.close().catch(() => {});
   return new Blob(chunks, { type: mime.split(';')[0] });
 }
 
@@ -732,10 +961,11 @@ async function makeVlogUI() {
   prog.classList.add('on');
   $('#btn-make-vlog').disabled = true;
   try {
+    const audioOpt = { bgm: $('#vlog-bgm').value, fx: $('#vlog-fx').checked };
     vlogBlob = await buildVlog(ym, (done, total, msg) => {
       bar.style.width = Math.round((done / total) * 100) + '%';
       stepEl.textContent = msg;
-    });
+    }, audioOpt);
     bar.style.width = '100%';
     stepEl.textContent = '완성! 🎉';
     const v = $('#vlog-video');
@@ -747,7 +977,9 @@ async function makeVlogUI() {
     prog.classList.remove('on');
     toast(err.message === 'no-recorder'
       ? '이 브라우저는 영상 만들기를 지원하지 않아요. 크롬/엣지에서 열어보세요.'
-      : '영상을 만들다 문제가 생겼어요. 다시 한 번 눌러보세요.');
+      : err.message === 'no-user-audio'
+        ? '먼저 아래에서 내 음원 파일을 골라주세요 📁'
+        : '영상을 만들다 문제가 생겼어요. 다시 한 번 눌러보세요.');
   }
   $('#btn-make-vlog').disabled = false;
 }
@@ -759,6 +991,47 @@ function downloadVlog() {
   a.download = `순간일기_${ym}_브이로그.webm`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* ==================== 달력 ==================== */
+let calYM = '';
+function openCalendar() {
+  const cur = entries[pageIndex];
+  calYM = (cur ? cur.date : todayStr()).slice(0, 7);
+  renderCal();
+  $('#cal-back').classList.add('on');
+}
+function shiftCalMonth(d) {
+  const [y, m] = calYM.split('-').map(Number);
+  const nd = new Date(y, m - 1 + d, 1);
+  calYM = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}`;
+  renderCal();
+}
+function renderCal() {
+  const [y, m] = calYM.split('-').map(Number);
+  $('#cal-title').textContent = `${y}년 ${m}월`;
+  const startDow = new Date(y, m - 1, 1).getDay();
+  const days = new Date(y, m, 0).getDate();
+  const firstIdxByDay = new Map();
+  entries.forEach((e, i) => {
+    if (e.date.slice(0, 7) === calYM && !firstIdxByDay.has(e.date)) firstIdxByDay.set(e.date, i);
+  });
+  let html = DOW.map((d) => `<span class="cal-dow">${d}</span>`).join('');
+  for (let i = 0; i < startDow; i++) html += '<span></span>';
+  for (let d = 1; d <= days; d++) {
+    const ds = `${calYM}-${String(d).padStart(2, '0')}`;
+    const idx = firstIdxByDay.get(ds);
+    html += idx !== undefined
+      ? `<button class="cal-day has" data-idx="${idx}">${d}<i></i></button>`
+      : `<span class="cal-day">${d}</span>`;
+  }
+  $('#cal-grid').innerHTML = html;
+}
+function jumpToEntry(idx) {
+  pageIndex = isMobile() ? idx : idx - (idx % 2);
+  $('#cal-back').classList.remove('on');
+  playFx('flip');
+  show('scr-book');
 }
 
 /* ==================== 설정 ==================== */
@@ -838,8 +1111,47 @@ function bind() {
   $('#btn-vlog-save').onclick = downloadVlog;
   $('#btn-wipe').onclick = wipeAll;
 
+  // 꾸미기 (스티커)
+  $$('#sticker-palette .schip').forEach((b) => { b.onclick = () => addSticker(b.textContent); });
+  bindStickerDrag();
+  $('#stk-bigger').onclick = () => resizeSticker(1.25);
+  $('#stk-smaller').onclick = () => resizeSticker(0.8);
+  $('#stk-delete').onclick = deleteSticker;
+
+  // 달력
+  $('#btn-cal').onclick = openCalendar;
+  $('#cal-prev').onclick = () => shiftCalMonth(-1);
+  $('#cal-next').onclick = () => shiftCalMonth(1);
+  $('#cal-close').onclick = () => $('#cal-back').classList.remove('on');
+  $('#cal-back').addEventListener('click', (e) => {
+    if (e.target.id === 'cal-back') $('#cal-back').classList.remove('on');
+    const day = e.target.closest('.cal-day.has');
+    if (day) jumpToEntry(Number(day.dataset.idx));
+  });
+
+  // 브이로그 소리 옵션
+  $('#vlog-bgm').onchange = () => {
+    $('#user-audio-row').classList.toggle('hidden', $('#vlog-bgm').value !== 'user');
+  };
+  $('#vlog-user-audio').onchange = async () => {
+    const file = $('#vlog-user-audio').files[0];
+    if (!file) return;
+    userAudioData = await file.arrayBuffer();
+    userAudioName = file.name;
+    $('#user-audio-name').textContent = `🎵 ${file.name} — 이 음원의 이용 범위(상업용 가능 여부)를 꼭 확인해 주세요`;
+  };
+
+  // 효과음 설정
+  const soundChk = $('#set-sound');
+  soundChk.checked = soundOn();
+  soundChk.onchange = () => {
+    localStorage.setItem(LS_PREFIX + 'sound', soundChk.checked ? 'on' : 'off');
+    if (soundChk.checked) playFx('chime');
+  };
+
   window.addEventListener('resize', () => {
     if (!$('#scr-book').classList.contains('hidden')) renderSpread();
+    else sizePageStickers();
   });
 }
 
@@ -872,19 +1184,36 @@ window.__diary = {
   speechSupported,
   camState: () => ({ hasStream: !!camStream, filter: camFilter, mode: camMode, captured: captured ? captured.kind : null }),
   // 시드용: dataURL을 blob으로 바꿔 엔트리 저장
-  async addEntry({ date, text = '', weather = '', filter = 'none', kind = 'none', dataURL = null }) {
+  async addEntry({ date, text = '', weather = '', filter = 'none', kind = 'none', dataURL = null, stickers = [] }) {
     let blob = null, thumb = null;
     if (dataURL) {
       blob = await (await fetch(dataURL)).blob();
       thumb = dataURL;
       if (kind === 'none') kind = 'photo';
     }
-    const entry = { id: uid(), date: date || todayStr(), ts: Date.now(), kind, blob, thumb, filter, weather, text };
+    const entry = { id: uid(), date: date || todayStr(), ts: Date.now(), kind, blob, thumb, filter, weather, stickers, text };
     await dbPut(entry);
     entries.push(entry);
     sortEntries();
     return entry.id;
   },
+  // 꾸미기·달력·소리 훅
+  addSticker,
+  getStickers: () => capStickers.slice(),
+  openCalendar,
+  jumpToEntry,
+  _lastVlogAudioTracks: -1,
+  // 배경음악이 실제 소리를 내는지 오프라인 렌더로 검증 (평균 진폭 반환)
+  async bgmSample(name) {
+    const oc = new OfflineAudioContext(1, 44100 * 2, 44100);
+    scheduleBgmBar(oc, oc.destination, name, 0);
+    const buf = await oc.startRendering();
+    const d = buf.getChannelData(0);
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += Math.abs(d[i]);
+    return sum / (d.length / 4);
+  },
+  userAudioLoaded: () => userAudioName,
   // 필터 단위 검증: 테스트 패턴에 필터를 적용해 중앙/모서리 픽셀 반환
   testFilter(name) {
     const w = 160, h = 120;

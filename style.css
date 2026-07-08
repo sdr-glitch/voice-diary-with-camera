@@ -434,6 +434,121 @@ textarea, select, input { font-family: inherit; }
 .modal-box p { font-size: 14px; line-height: 1.8; }
 .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
 
+/* ============================================================
+   6) 꾸미기 (스티커)
+   ============================================================ */
+#sticker-layer {
+  position: absolute; inset: 0; z-index: 5;
+  pointer-events: none; /* 촬영 후(decorating)에만 조작 가능 */
+  touch-action: none;
+  overflow: hidden;
+}
+.cam-stage.decorating #sticker-layer { pointer-events: auto; }
+#sticker-layer .stk {
+  position: absolute; transform: translate(-50%, -50%);
+  cursor: grab; user-select: none; touch-action: none;
+  line-height: 1; filter: drop-shadow(0 2px 4px rgba(0,0,0,.3));
+}
+#sticker-layer .stk.sel {
+  outline: 2px dashed rgba(255,255,255,.85); outline-offset: 4px; border-radius: 8px;
+}
+#deco-box { display: flex; flex-direction: column; gap: 8px; }
+#deco-box .lbl { font-size: 12px; color: var(--ink-soft); }
+.schip {
+  border: 1px solid var(--line); background: #fff; border-radius: 10px;
+  padding: 6px 9px; font-size: 20px; line-height: 1;
+  transition: transform .1s ease;
+}
+.schip:active { transform: scale(1.2); }
+.deco-controls { display: flex; gap: 8px; }
+
+/* 페이지·미리보기 위 스티커 (저장된 것) */
+.pg-media .stk {
+  position: absolute; transform: translate(-50%, -50%);
+  line-height: 1; pointer-events: none;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,.3));
+}
+
+/* ============================================================
+   7) 달력 모달
+   ============================================================ */
+#cal-back {
+  position: fixed; inset: 0; background: rgba(40,32,22,.5); z-index: 80;
+  display: none; align-items: center; justify-content: center; padding: 20px;
+  backdrop-filter: blur(3px);
+}
+#cal-back.on { display: flex; }
+.cal-box {
+  background: var(--paper); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 18px; width: min(400px, 94vw); display: flex; flex-direction: column; gap: 12px;
+}
+.cal-head { display: flex; align-items: center; gap: 10px; }
+.cal-head span { flex: 1; text-align: center; font-family: var(--serif); font-weight: 600; font-size: 16px; }
+.nav-arrow.sm { width: 36px; height: 36px; font-size: 13px; }
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center;
+}
+.cal-dow { font-size: 11px; color: var(--ink-dim); padding: 4px 0; }
+.cal-day {
+  position: relative; aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--ink-dim); border-radius: 10px; border: none; background: transparent;
+}
+button.cal-day.has {
+  color: var(--ink); font-weight: 600; background: var(--paper-2);
+  cursor: pointer; transition: background .15s ease;
+}
+button.cal-day.has:hover { background: var(--accent-soft); }
+.cal-day.has i {
+  position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+.cal-hint { font-size: 12px; color: var(--ink-soft); text-align: center; }
+
+/* ============================================================
+   8) 브이로그 소리 옵션
+   ============================================================ */
+.vlog-audio {
+  display: flex; flex-direction: column; gap: 8px;
+  border-top: 1px dashed var(--line); padding-top: 12px;
+}
+.vlog-audio-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vlog-audio .lbl { font-size: 13px; color: var(--ink-soft); }
+#vlog-bgm {
+  flex: 1; min-width: 200px; border: 1px solid var(--line); border-radius: 10px;
+  padding: 9px 12px; font-size: 13px; background: #fffdf7; color: var(--ink);
+}
+#vlog-user-audio { font-size: 12px; max-width: 100%; }
+.set-toggle { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); }
+
+/* ============================================================
+   9) 마감 다듬기 (스토어 준비 — 질감·포커스·안전영역)
+   ============================================================ */
+/* 표지 스티치(박음질) 라인 */
+.cover-book .stitch {
+  position: absolute; inset: 12px; pointer-events: none;
+  border: 2px dashed rgba(246,241,231,.3);
+  border-radius: 8px 14px 14px 8px;
+}
+/* 책 속지 단면(겹친 페이지) 연출 */
+.page.left {
+  box-shadow: inset -14px 0 22px -14px rgba(0,0,0,.35),
+    -2px 0 0 #fffdf7, -4px 0 0 var(--paper-2), -6px 0 0 #fffdf7, -7px 0 0 rgba(60,45,25,.28);
+}
+.page.right {
+  box-shadow: inset 14px 0 22px -14px rgba(0,0,0,.35),
+    2px 0 0 #fffdf7, 4px 0 0 var(--paper-2), 6px 0 0 #fffdf7, 7px 0 0 rgba(60,45,25,.28);
+}
+/* 키보드 접근성 (스토어 심사 대비) */
+button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible {
+  outline: 3px solid var(--accent-soft); outline-offset: 2px;
+}
+.tbtn { transition: background .15s ease, transform .1s ease; }
+.tbtn:active { transform: scale(.97); }
+#modal-back { backdrop-filter: blur(3px); }
+/* 홈바 있는 폰의 안전영역 */
+#btn-new { bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+.screen { padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px)); }
+
 /* ---------- 모바일: 한 페이지씩 ---------- */
 @media (max-width: 720px) {
   .book { width: min(440px, 96vw); }

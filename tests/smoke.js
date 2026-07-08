@@ -164,6 +164,96 @@ function ok(cond, name) {
   ok(fs.existsSync(path.join(root, 'icon-192.png')) && fs.existsSync(path.join(root, 'icon-512.png')), '앱 아이콘 파일 존재');
   ok(fs.existsSync(path.join(root, 'sw.js')), '서비스 워커 파일 존재 (file://에선 등록 스킵)');
 
+  console.log('\n[13] 달력에서 날짜 점프');
+  await page.evaluate(async (png) => {
+    await window.__diary.addEntry({ date: '2026-06-03', text: '유월 첫 기록', weather: '⛅', dataURL: png });
+    await window.__diary.addEntry({ date: '2026-06-15', text: '비 오는 창가', weather: '🌧️', dataURL: png });
+    await window.__diary.addEntry({ date: '2026-07-02', text: '칠월의 시작', weather: '☀️', dataURL: png, stickers: [{ e: '⭐', x: 0.3, y: 0.3, s: 0.2 }] });
+  }, png);
+  await page.evaluate(() => window.__diary.show('scr-book'));
+  await page.click('#btn-cal');
+  ok(await page.isVisible('#cal-back.on'), '달력 열림');
+  ok((await page.textContent('#cal-title')).includes('2026년 6월'), '보고 있는 달(6월) 표시');
+  ok((await page.$$eval('.cal-day.has', (b) => b.length)) === 2, '기록 있는 날 2개 표시');
+  await page.click('.cal-day.has'); // 6월 3일
+  await page.waitForTimeout(300);
+  const jumped = await page.evaluate(() => window.__diary.getPageIndex());
+  ok(jumped === 0, `해당 날짜 페이지로 점프 (index ${jumped})`);
+  ok((await page.textContent('#page-left')).includes('유월 첫 기록'), '점프한 페이지 내용 확인');
+  // 다음 달로 넘겨 7월 기록으로 점프
+  await page.click('#btn-cal');
+  await page.click('#cal-next');
+  ok((await page.textContent('#cal-title')).includes('2026년 7월'), '다음 달로 이동');
+  await page.click('.cal-day.has'); // 7월 2일
+  await page.waitForTimeout(300);
+  const jumped2 = await page.evaluate(() => window.__diary.getPageIndex());
+  ok(jumped2 === 2, `7월 기록으로 점프 (index ${jumped2})`);
+  ok(await page.isVisible('#page-left .stk'), '시드한 스티커가 페이지에 렌더링');
+
+  console.log('\n[14] 스티커 꾸미기 (촬영 → 부착 → 이동 → 저장)');
+  await page.click('#btn-new');
+  await page.waitForFunction(() => window.__diary.camState().hasStream, null, { timeout: 8000 });
+  await page.click('#btn-shutter');
+  await page.waitForFunction(() => window.__diary.camState().captured === 'photo', null, { timeout: 5000 });
+  ok(await page.isVisible('#deco-box'), '촬영 후 꾸미기 도구 표시');
+  await page.click('#sticker-palette .schip'); // ⭐
+  let stks = await page.evaluate(() => window.__diary.getStickers());
+  ok(stks.length === 1 && stks[0].e === '⭐', '스티커 부착 (가운데)');
+  // 드래그로 왼쪽 위로 이동
+  const lay = await page.$('#sticker-layer');
+  const lb = await lay.boundingBox();
+  await page.mouse.move(lb.x + lb.width * 0.5, lb.y + lb.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(lb.x + lb.width * 0.25, lb.y + lb.height * 0.25, { steps: 6 });
+  await page.mouse.up();
+  stks = await page.evaluate(() => window.__diary.getStickers());
+  ok(stks[0].x < 0.35 && stks[0].y < 0.35, `드래그로 이동 (x=${stks[0].x.toFixed(2)}, y=${stks[0].y.toFixed(2)})`);
+  await page.click('#stk-bigger');
+  stks = await page.evaluate(() => window.__diary.getStickers());
+  ok(stks[0].s > 0.16, `크기 키우기 (s=${stks[0].s.toFixed(2)})`);
+  await page.fill('#diary-text', '스티커 테스트한 날');
+  await page.click('#btn-save-entry');
+  await page.waitForSelector('#scr-book:not(.hidden)');
+  const saved = (await page.evaluate(() => window.__diary.getEntries())).find((e) => e.text.includes('스티커 테스트'));
+  ok(saved && saved.stickers.length === 1, '스티커가 일기와 함께 저장');
+  ok(await page.isVisible('.pg-media .stk'), '페이지 위에 스티커 렌더링');
+
+  console.log('\n[15] 브이로그 배경음악 (자체 합성 검증)');
+  const rmsP = await page.evaluate(() => window.__diary.bgmSample('piano'));
+  const rmsM = await page.evaluate(() => window.__diary.bgmSample('musicbox'));
+  ok(rmsP > 0.0005, `피아노 음원이 실제 소리를 냄 (진폭 ${rmsP.toFixed(4)})`);
+  ok(rmsM > 0.0005, `오르골 음원이 실제 소리를 냄 (진폭 ${rmsM.toFixed(4)})`);
+  const vA = await page.evaluate(async () => {
+    const b = await window.__diary.buildVlog('2026-06', () => {}, { bgm: 'piano', fx: true });
+    return { size: b.size, tracks: window.__diary._lastVlogAudioTracks };
+  });
+  ok(vA.tracks === 1, '브이로그에 소리 트랙 포함');
+  ok(vA.size > 5000, `배경음악 브이로그 생성 (${vA.size}B)`);
+
+  console.log('\n[16] 내 음원 파일 사용');
+  // 0.5초 440Hz 사인파 wav 생성 (16bit PCM)
+  const sr = 44100, n = sr / 2;
+  const wav = Buffer.alloc(44 + n * 2);
+  wav.write('RIFF', 0); wav.writeUInt32LE(36 + n * 2, 4); wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sr, 24); wav.writeUInt32LE(sr * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+  wav.write('data', 36); wav.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) wav.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / sr) * 12000), 44 + i * 2);
+  const wavPath = path.join(__dirname, 'tmp-tone.wav');
+  fs.writeFileSync(wavPath, wav);
+  await page.evaluate(() => window.__diary.show('scr-vlog'));
+  await page.selectOption('#vlog-bgm', 'user');
+  ok(await page.isVisible('#user-audio-row'), '음원 파일 선택칸 표시');
+  await page.setInputFiles('#vlog-user-audio', wavPath);
+  await page.waitForFunction(() => window.__diary.userAudioLoaded(), null, { timeout: 5000 });
+  ok(true, '사용자 음원 로드');
+  const vU = await page.evaluate(async () => {
+    const b = await window.__diary.buildVlog('2026-06', () => {}, { bgm: 'user', fx: false });
+    return { size: b.size, tracks: window.__diary._lastVlogAudioTracks };
+  });
+  ok(vU.tracks === 1 && vU.size > 5000, `내 음원으로 브이로그 생성 (${vU.size}B)`);
+  fs.unlinkSync(wavPath);
+
   console.log('\n[콘솔/페이지 에러]');
   // 외부 네트워크 차단(폰트 등)은 앱 오류 아님 — 비차단 로드라 렌더링 영향 없음
   const realErrors = errors.filter((e) =>
