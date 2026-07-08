@@ -12,23 +12,29 @@
 const LS_PREFIX = 'momentDiary:';
 const DB_NAME = 'moment-diary';
 const DB_STORE = 'entries';
-const CLIP_SEC = 2;               // 짧은 영상 길이(초)
-const VLOG_PHOTO_MS = 1300;       // 브이로그에서 사진 1장 머무는 시간
-const VLOG_CLIP_MS = 2400;        // 브이로그에서 영상 최대 재생 시간
+const VLOG_INTRO_MS = 1900;       // 브이로그 표지
+const VLOG_OUTRO_MS = 1600;       // 브이로그 마무리
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 
 let db = null;
 let entries = [];                 // 날짜순 정렬 유지
 let pageIndex = 0;                // 스프레드 왼쪽(모바일은 현재) 페이지 인덱스
 let flipping = false;
+let curScreen = 'scr-cover';      // 현재 화면 id
+let backTo = 'scr-cal';           // 하위 화면(기록·브이로그·설정)에서 돌아갈 곳
 
 // 촬영 상태
 let camStream = null;
 let camLoopId = 0;
 let camFilter = 'vintage';
 let camMode = 'photo';            // photo | video
-let captured = null;              // { kind, blob, thumb, filter }
+let captured = null;              // { kind, blob, thumb, filter, durMs }
 let recording = false;
+let vidRec = null;                // 진행 중인 MediaRecorder (영상 토글 녹화)
+let vidChunks = [];
+let vidStream = null;
+let recStartTs = 0;
+let recTimer = 0;
 
 // 음성 상태
 let speech = null;
@@ -217,14 +223,18 @@ function sortEntries() {
 
 /* ==================== 화면 전환 ==================== */
 function show(id) {
+  curScreen = id;
   $$('.screen').forEach((s) => s.classList.toggle('hidden', s.id !== id));
   if (id !== 'scr-capture') stopCamera();
   if (id === 'scr-capture') openCapture();
+  if (id === 'scr-cal') renderCal();
   if (id === 'scr-book') renderSpread();
   if (id === 'scr-vlog') fillVlogMonths();
   if (id === 'scr-settings') renderStats();
   if (id === 'scr-cover') renderCoverCount();
 }
+/** 하위 화면 열기 — 돌아갈 화면(backTo)을 현재 화면으로 기억 */
+function openSub(id) { backTo = curScreen; show(id); }
 
 function renderCoverCount() {
   $('#cover-count').textContent = entries.length
@@ -241,8 +251,9 @@ function mediaURL(e) {
 
 function pageHTML(e, num) {
   if (!e) {
-    return `<div class="pg-empty"><div class="big">🌿</div>
-      <p>아직 이 페이지는 비어 있어요.<br>오른쪽 아래 ✍️ 버튼으로<br>오늘의 순간을 담아보세요.</p></div>`;
+    return `<button class="pg-empty" id="pg-empty-btn">
+      <span class="pg-empty-plus">＋</span>
+      <p>아직 이 페이지는 비어 있어요.<br>여기를 눌러<br>오늘의 순간을 담아보세요.</p></button>`;
   }
   const d = parseDate(e.date);
   const stk = (e.stickers || []).map((s) =>
@@ -251,21 +262,27 @@ function pageHTML(e, num) {
   if (e.kind === 'photo' && e.blob) {
     media = `<div class="pg-media"><img src="${mediaURL(e)}" alt="일기 사진">${stk}<span class="media-tag">${filterLabel(e.filter)}</span></div>`;
   } else if (e.kind === 'video' && e.blob) {
-    media = `<div class="pg-media"><video src="${mediaURL(e)}" muted loop autoplay playsinline></video>${stk}<span class="media-tag">🎥 ${CLIP_SEC}초 · ${filterLabel(e.filter)}</span></div>`;
+    const secs = e.durMs ? Math.max(1, Math.round(e.durMs / 1000)) + '초 ' : '';
+    media = `<div class="pg-media"><video src="${mediaURL(e)}" muted loop autoplay playsinline></video>${stk}<span class="media-tag">영상 ${secs}· ${filterLabel(e.filter)}</span></div>`;
   }
+  const meta = [e.mood ? `기분 ${moodLabel(e.mood)}` : '', e.weather ? `날씨 ${e.weather}` : '']
+    .filter(Boolean).join('　');
   return `
-    <div class="pg-date"><span class="pg-weather">${e.weather || '📝'}</span>
-      ${fmtDateKo(e.date)} <span class="pg-dow">${DOW[d.getDay()]}요일</span></div>
+    <div class="pg-date">${fmtDateKo(e.date)} <span class="pg-dow">${DOW[d.getDay()]}요일</span></div>
+    ${meta ? `<div class="pg-meta">${meta}</div>` : ''}
     ${media}
     <div class="pg-text">${escapeHTML(e.text || '')}</div>
-    <button class="pg-del" data-id="${e.id}" title="이 기록 지우기" aria-label="이 기록 지우기">🗑️</button>
+    <button class="pg-del" data-id="${e.id}" title="이 기록 지우기" aria-label="이 기록 지우기">지우기</button>
     <span class="pg-num">${num}</span>`;
 }
 function escapeHTML(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function filterLabel(f) {
-  return { none: '무보정', vintage: '🎞️ 빈티지', colorpop: '🌈 색감', fisheye: '🔮 볼록' }[f] || '';
+  return { none: '무보정', vintage: '빈티지', colorpop: '색감', fisheye: '볼록거울' }[f] || '';
+}
+function moodLabel(m) {
+  return { 설렘: '설렘', 행복: '행복', 평온: '평온', 그저그럼: '그저 그럼', 지침: '지침', 울적: '울적', 속상: '속상' }[m] || m;
 }
 
 function step() { return isMobile() ? 1 : 2; }
@@ -459,7 +476,7 @@ async function openCapture() {
     });
   } catch (err) {
     camStream = null;
-    camMsg('카메라를 쓸 수 없어요 😢<br>주소창 근처의 <b>카메라 권한</b>을 허용해 주세요.<br>사진 없이 <b>글만으로도</b> 일기를 남길 수 있어요!');
+    camMsg('카메라를 쓸 수 없어요.<br>주소창 근처의 <b>카메라 권한</b>을 허용해 주세요.<br>사진 없이 <b>글만으로도</b> 일기를 남길 수 있어요.');
     $('#btn-shutter').disabled = true;
     return;
   }
@@ -476,13 +493,21 @@ async function openCapture() {
   const myLoop = ++camLoopId;
   (function loop() {
     if (myLoop !== camLoopId || !camStream) return;
-    if (!captured) drawFiltered(ctx, video, w, h, camFilter);
+    // 촬영 완료(미리보기) 전까지는 계속 그린다 — 영상 녹화 중에도 캔버스가 갱신돼야 녹화가 담김
+    if (!(captured && captured.blob)) drawFiltered(ctx, video, w, h, camFilter);
     requestAnimationFrame(loop);
   })();
 }
 
 function stopCamera() {
   camLoopId++;
+  // 녹화 중 화면을 벗어나면 안전하게 정리
+  if (recording && vidRec) {
+    clearInterval(recTimer);
+    try { vidRec.onstop = null; vidRec.stop(); } catch (e) {}
+    if (vidStream) vidStream.getTracks().forEach((t) => t.stop());
+    recording = false;
+  }
   if (camStream) { camStream.getTracks().forEach((t) => t.stop()); camStream = null; }
   stopSpeech();
 }
@@ -496,10 +521,12 @@ function resetCaptureUI() {
   $('#cam-canvas').classList.remove('hidden');
   $('#btn-retake').classList.add('hidden');
   $('#btn-shutter').classList.remove('hidden');
+  $('#btn-shutter').classList.remove('recording');
   $('#rec-dot').classList.remove('on');
   $('#diary-text').value = '';
   $('#voice-status').textContent = '';
   $$('.wchip').forEach((b) => b.classList.remove('on'));
+  $$('.mchip').forEach((b) => b.classList.remove('on'));
 }
 
 function thumbFrom(canvas) {
@@ -516,53 +543,79 @@ function pickMime() {
   return '';
 }
 
+/** 셔터 버튼: 사진이면 즉시 촬영, 영상이면 녹화 시작/정지 토글(길이 제한 없음) */
 async function shutter() {
-  if (!camStream || recording || captured) return;
+  if (!camStream) return;
+  if (captured && captured.blob) return; // 이미 촬영 완료(미리보기 중)
   const cv = $('#cam-canvas');
-  playFx('shutter');
   if (camMode === 'photo') {
+    playFx('shutter');
     const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.92));
     captured = { kind: 'photo', blob, thumb: thumbFrom(cv), filter: camFilter };
     $('#cap-preview-img').src = URL.createObjectURL(blob);
     $('#cap-preview-img').classList.remove('hidden');
     $('#cam-canvas').classList.add('hidden');
     afterCapture();
-  } else {
-    const mime = pickMime();
-    if (!mime) { toast('이 브라우저는 영상 녹화를 지원하지 않아요. 사진으로 찍어보세요!'); return; }
-    recording = true;
-    $('#rec-dot').classList.add('on');
-    $('#btn-shutter').disabled = true;
-    const thumb = thumbFrom(cv);
-    const stream = cv.captureStream(30);
-    const rec = new MediaRecorder(stream, { mimeType: mime });
-    const chunks = [];
-    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    const done = new Promise((r) => { rec.onstop = r; });
-    rec.start(200);
-    await sleep(CLIP_SEC * 1000);
-    rec.stop();
-    await done;
-    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+  // 영상 모드
+  if (!recording) startVideoRec();
+  else stopVideoRec();
+}
+
+function startVideoRec() {
+  const cv = $('#cam-canvas');
+  const mime = pickMime();
+  if (!mime) { toast('이 브라우저는 영상 녹화를 지원하지 않아요. 사진으로 찍어보세요.'); return; }
+  playFx('shutter');
+  recording = true;
+  captured = { kind: 'video', thumb: thumbFrom(cv), filter: camFilter, _mime: mime };
+  vidChunks = [];
+  vidStream = cv.captureStream(30);
+  vidRec = new MediaRecorder(vidStream, { mimeType: mime });
+  vidRec.ondataavailable = (e) => { if (e.data.size) vidChunks.push(e.data); };
+  vidRec.start(200);
+  recStartTs = Date.now();
+  $('#rec-dot').classList.add('on');
+  $('#btn-shutter').classList.add('recording');
+  $('#rec-time').textContent = '0초';
+  recTimer = setInterval(() => {
+    $('#rec-time').textContent = Math.floor((Date.now() - recStartTs) / 1000) + '초';
+  }, 250);
+  toast('녹화 시작! 다시 누르면 멈춰요. 원하는 만큼 담아보세요.');
+}
+
+function stopVideoRec() {
+  if (!recording || !vidRec) return;
+  clearInterval(recTimer);
+  const durMs = Date.now() - recStartTs;
+  const mime = captured._mime;
+  const done = new Promise((r) => { vidRec.onstop = r; });
+  vidRec.stop();
+  done.then(() => {
+    if (vidStream) vidStream.getTracks().forEach((t) => t.stop());
     recording = false;
     $('#rec-dot').classList.remove('on');
-    $('#btn-shutter').disabled = false;
-    const blob = new Blob(chunks, { type: mime.split(';')[0] });
-    captured = { kind: 'video', blob, thumb, filter: camFilter };
+    $('#btn-shutter').classList.remove('recording');
+    const blob = new Blob(vidChunks, { type: mime.split(';')[0] });
+    captured.blob = blob;
+    captured.durMs = durMs;
     const pv = $('#cap-preview-video');
     pv.src = URL.createObjectURL(blob);
     pv.classList.remove('hidden');
     pv.play().catch(() => {});
     $('#cam-canvas').classList.add('hidden');
     afterCapture();
-  }
+  });
 }
 function afterCapture() {
   $('#btn-shutter').classList.add('hidden');
   $('#btn-retake').classList.remove('hidden');
   $('#deco-box').classList.remove('hidden');
   document.querySelector('.cam-stage').classList.add('decorating');
-  toast(camMode === 'photo' ? '찰칵! 스티커로 꾸미거나 아래에 느낌을 남겨보세요 🎙️' : `${CLIP_SEC}초 순간을 담았어요 🎥 스티커로 꾸며보세요`);
+  toast(captured && captured.kind === 'photo'
+    ? '찰칵! 스티커로 꾸미거나 아래에 느낌을 남겨보세요.'
+    : '순간을 담았어요. 스티커로 꾸며보세요.');
 }
 function retake() {
   const img = $('#cap-preview-img'), pv = $('#cap-preview-video');
@@ -573,6 +626,7 @@ function retake() {
   clearStickers();
   $('#cam-canvas').classList.remove('hidden');
   $('#btn-shutter').classList.remove('hidden');
+  $('#btn-shutter').classList.remove('recording');
   $('#btn-retake').classList.add('hidden');
 }
 
@@ -598,7 +652,7 @@ function renderStickerLayer() {
   $('#deco-controls').classList.toggle('hidden', selSticker < 0);
 }
 function addSticker(emoji) {
-  if (!captured) { toast('먼저 사진이나 영상을 찍은 다음 꾸밀 수 있어요 📸'); return; }
+  if (!captured || !captured.blob) { toast('먼저 사진이나 영상을 찍은 다음 꾸밀 수 있어요.'); return; }
   capStickers.push({ e: emoji, x: 0.5, y: 0.5, s: 0.16 });
   selSticker = capStickers.length - 1;
   renderStickerLayer();
@@ -652,7 +706,7 @@ function startSpeech() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const status = $('#voice-status');
   if (!SR) {
-    status.textContent = '이 브라우저는 음성 받아쓰기를 지원하지 않아요. 아래 칸에 직접 적어주세요 ✏️';
+    status.textContent = '이 브라우저는 음성 받아쓰기를 지원하지 않아요. 아래 칸에 직접 적어주세요.';
     status.classList.add('err');
     $('#diary-text').focus();
     return;
@@ -677,7 +731,7 @@ function startSpeech() {
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
       status.textContent = '마이크 권한이 필요해요. 주소창 근처에서 마이크를 허용해 주세요.';
     } else {
-      status.textContent = '받아쓰기가 잠시 끊겼어요. 직접 입력하거나 🎙️를 다시 눌러주세요.';
+      status.textContent = '받아쓰기가 잠시 끊겼어요. 직접 입력하거나 음성 버튼을 다시 눌러주세요.';
     }
   };
   speech.onend = () => { if (speechOn) stopSpeech(); };
@@ -702,28 +756,34 @@ function toggleSpeech() { speechOn ? stopSpeech() : startSpeech(); }
 /* ==================== 저장 ==================== */
 async function saveEntry() {
   const text = $('#diary-text').value.trim();
-  if (!captured && !text) {
-    toast('사진을 찍거나, 한 줄이라도 느낌을 남겨보세요 🙂');
+  const hasMedia = captured && captured.blob;
+  if (!hasMedia && !text) {
+    toast('사진·영상을 찍거나, 한 줄이라도 느낌을 남겨보세요.');
     return null;
   }
+  if (recording) { toast('녹화를 먼저 멈춰주세요. 셔터 버튼을 한 번 더 누르면 멈춰요.'); return null; }
   const weatherBtn = $('.wchip.on');
+  const moodBtn = $('.mchip.on');
   const entry = {
     id: uid(),
     date: todayStr(),
     ts: Date.now(),
-    kind: captured ? captured.kind : 'none',
-    blob: captured ? captured.blob : null,
-    thumb: captured ? captured.thumb : null,
-    filter: captured ? captured.filter : 'none',
+    kind: hasMedia ? captured.kind : 'none',
+    blob: hasMedia ? captured.blob : null,
+    thumb: hasMedia ? captured.thumb : null,
+    filter: hasMedia ? captured.filter : 'none',
+    durMs: hasMedia && captured.durMs ? captured.durMs : 0,
     weather: weatherBtn ? weatherBtn.dataset.weather : '',
-    stickers: captured ? capStickers.slice() : [],
+    mood: moodBtn ? moodBtn.dataset.mood : '',
+    stickers: hasMedia ? capStickers.slice() : [],
     text,
   };
   await dbPut(entry);
   entries.push(entry);
   sortEntries();
-  pageIndex = maxIndex();
-  toast('일기장에 붙였어요! 📖');
+  pageIndex = entries.indexOf(entry);
+  if (!isMobile()) pageIndex -= pageIndex % 2;
+  toast('일기장에 붙였어요.');
   show('scr-book');
   return entry;
 }
@@ -756,17 +816,61 @@ function monthsWithEntries() {
   });
   return Array.from(map.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
 }
+let vlogClips = [];   // [{id, on}] — 현재 선택 달의 장면 순서/포함 여부
+let vlogTargetSec = 60;
+
 function fillVlogMonths() {
   const sel = $('#vlog-month');
   const months = monthsWithEntries();
+  const prev = sel.value;
   sel.innerHTML = months.length
     ? months.map(([ym, n]) => {
         const [y, m] = ym.split('-');
         return `<option value="${ym}">${y}년 ${Number(m)}월 (${n}개의 순간)</option>`;
       }).join('')
     : '<option value="">아직 기록이 없어요</option>';
+  if (prev && months.some(([ym]) => ym === prev)) sel.value = prev;
   $('#btn-make-vlog').disabled = !months.length;
+  buildClipList();
 }
+
+/** 선택한 달의 장면 목록(포함/순서 편집용)을 만든다 */
+function buildClipList() {
+  const ym = $('#vlog-month').value;
+  vlogClips = entries.filter((e) => e.date.startsWith(ym)).map((e) => ({ id: e.id, on: true }));
+  renderClipList();
+}
+function kindLabel(e) {
+  return e.kind === 'video' ? '영상' : e.kind === 'photo' ? '사진' : '글';
+}
+function renderClipList() {
+  const ul = $('#clip-list');
+  if (!vlogClips.length) { ul.innerHTML = '<li class="clip-empty">이 달에는 아직 기록이 없어요.</li>'; return; }
+  ul.innerHTML = vlogClips.map((c, i) => {
+    const e = entries.find((x) => x.id === c.id);
+    if (!e) return '';
+    const thumb = e.thumb ? `<img src="${e.thumb}" alt="">` : '<span class="clip-noimg">글</span>';
+    const preview = (e.text || '').replace(/\s+/g, ' ').trim().slice(0, 18) || moodLabel(e.mood) || '기록';
+    return `<li class="clip-item ${c.on ? '' : 'off'}" data-i="${i}">
+      <input type="checkbox" class="clip-chk" data-i="${i}" ${c.on ? 'checked' : ''} aria-label="넣기">
+      <span class="clip-thumb">${thumb}</span>
+      <span class="clip-info"><b>${fmtDateKo(e.date)}</b> <em>${kindLabel(e)}</em><br>${escapeHTML(preview)}</span>
+      <span class="clip-move">
+        <button class="clip-up" data-i="${i}" aria-label="위로" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="clip-down" data-i="${i}" aria-label="아래로" ${i === vlogClips.length - 1 ? 'disabled' : ''}>▼</button>
+      </span>
+    </li>`;
+  }).join('');
+  const on = vlogClips.filter((c) => c.on).length;
+  $('#btn-make-vlog').disabled = !on;
+}
+function moveClip(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= vlogClips.length) return;
+  const t = vlogClips[i]; vlogClips[i] = vlogClips[j]; vlogClips[j] = t;
+  renderClipList();
+}
+function toggleClip(i, on) { if (vlogClips[i]) vlogClips[i].on = on; renderClipList(); }
 
 function drawCover(ctx, src, sw, sh, W, H) {
   const scale = Math.max(W / sw, H / sh);
@@ -831,15 +935,28 @@ function blobToImage(blobOrDataURL) {
   });
 }
 
-async function buildVlog(ym, onProg = () => {}, audioOpt = {}) {
-  const list = entries.filter((e) => e.date.startsWith(ym));
+async function buildVlog(ym, onProg = () => {}, opts = {}) {
+  // 넣을 장면·순서 (편집기에서 고른 ids가 있으면 그대로, 없으면 그달 전부)
+  let list;
+  if (opts.ids && opts.ids.length) {
+    list = opts.ids.map((id) => entries.find((e) => e.id === id)).filter(Boolean);
+  } else {
+    list = entries.filter((e) => e.date.startsWith(ym));
+  }
   if (!list.length) throw new Error('empty-month');
   const mime = pickMime();
   if (!mime) throw new Error('no-recorder');
-  const bgm = audioOpt.bgm || 'none';
-  const fxOn = !!audioOpt.fx;
+  const bgm = opts.bgm || 'none';
+  const fxOn = !!opts.fx;
   const [y, m] = ym.split('-').map(Number);
   const lastDay = new Date(y, m, 0).getDate();
+
+  // 전체를 목표 길이(기본 60초)로 압축 — 장면 수에 맞춰 한 장면 시간 자동 계산
+  const targetSec = opts.targetSec || 60;
+  const bodyMs = Math.max(list.length * 500, targetSec * 1000 - VLOG_INTRO_MS - VLOG_OUTRO_MS);
+  const slotMs = Math.min(5000, Math.max(500, Math.round(bodyMs / list.length)));
+  const title = (opts.title && opts.title.trim()) ? opts.title.trim() : `${y}년 ${m}월의 여정`;
+
   const W = 720, H = 540;
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
@@ -896,8 +1013,8 @@ async function buildVlog(ym, onProg = () => {}, audioOpt = {}) {
   rec.start(200);
   // 인트로
   onProg(0, list.length + 2, '표지를 그리는 중…');
-  drawFn = () => vlogTitleSlide(ctx, W, H, `${y}년 ${m}월의 여정`, `1일 — ${lastDay}일 · ${list.length}개의 순간`);
-  await sleep(1700);
+  drawFn = () => vlogTitleSlide(ctx, W, H, title, `1일 — ${lastDay}일 · ${list.length}개의 순간`);
+  await sleep(VLOG_INTRO_MS);
 
   for (let i = 0; i < list.length; i++) {
     const e = list[i];
@@ -905,19 +1022,18 @@ async function buildVlog(ym, onProg = () => {}, audioOpt = {}) {
     if (fxOn && acx) playFx('chime', acx, adest); // 장면 전환 효과음
     try {
       if (e.kind === 'video' && e.blob) {
+        // 영상은 길이가 제각각 — 배정된 시간(slotMs)만큼만 보여주고 넘어감(압축)
         const v = await loadVideoBlob(e.blob);
+        v.loop = true;
         await v.play().catch(() => {});
         drawFn = () => { drawCover(ctx, v, v.videoWidth || W, v.videoHeight || H, W, H); vlogStickers(ctx, W, H, e); vlogCaption(ctx, W, H, e); };
-        await Promise.race([
-          new Promise((r) => { v.onended = r; }),
-          sleep(VLOG_CLIP_MS),
-        ]);
+        await sleep(slotMs);
         v.pause();
         URL.revokeObjectURL(v.src);
       } else if (e.kind === 'photo' && e.blob) {
         const img = await blobToImage(e.blob);
         drawFn = () => { drawCover(ctx, img, img.naturalWidth, img.naturalHeight, W, H); vlogStickers(ctx, W, H, e); vlogCaption(ctx, W, H, e); };
-        await sleep(VLOG_PHOTO_MS);
+        await sleep(slotMs);
         URL.revokeObjectURL(img.src);
       } else {
         // 글만 있는 날 — 텍스트 슬라이드
@@ -931,7 +1047,7 @@ async function buildVlog(ym, onProg = () => {}, audioOpt = {}) {
           if (line.length > 24) line = line.slice(0, 24) + '…';
           ctx.fillText(line, W / 2, H / 2 + 10);
         };
-        await sleep(VLOG_PHOTO_MS);
+        await sleep(slotMs);
       }
     } catch (err) {
       // 손상된 미디어는 건너뛰고 계속 (한 장 때문에 전체가 죽으면 안 됨)
@@ -941,8 +1057,8 @@ async function buildVlog(ym, onProg = () => {}, audioOpt = {}) {
 
   // 아웃트로
   onProg(list.length + 2, list.length + 2, '마무리하는 중…');
-  drawFn = () => vlogTitleSlide(ctx, W, H, '수고했어요, 이번 달도 🌿', '순간일기');
-  await sleep(1500);
+  drawFn = () => vlogTitleSlide(ctx, W, H, '수고했어요, 이번 달도', '순간일기');
+  await sleep(VLOG_OUTRO_MS);
 
   running = false;
   rec.stop();
@@ -959,15 +1075,23 @@ async function makeVlogUI() {
   const prog = $('#vlog-progress'), bar = $('#vlog-bar'), stepEl = $('#vlog-step');
   $('#vlog-result').classList.remove('on');
   prog.classList.add('on');
+  const ids = vlogClips.filter((c) => c.on).map((c) => c.id);
+  if (!ids.length) { toast('브이로그에 넣을 장면을 하나 이상 골라주세요.'); return; }
   $('#btn-make-vlog').disabled = true;
   try {
-    const audioOpt = { bgm: $('#vlog-bgm').value, fx: $('#vlog-fx').checked };
+    const opts = {
+      bgm: $('#vlog-bgm').value,
+      fx: $('#vlog-fx').checked,
+      title: $('#vlog-title').value,
+      targetSec: vlogTargetSec,
+      ids,
+    };
     vlogBlob = await buildVlog(ym, (done, total, msg) => {
       bar.style.width = Math.round((done / total) * 100) + '%';
       stepEl.textContent = msg;
-    }, audioOpt);
+    }, opts);
     bar.style.width = '100%';
-    stepEl.textContent = '완성! 🎉';
+    stepEl.textContent = '완성!';
     const v = $('#vlog-video');
     if (v.src) URL.revokeObjectURL(v.src);
     v.src = URL.createObjectURL(vlogBlob);
@@ -978,7 +1102,7 @@ async function makeVlogUI() {
     toast(err.message === 'no-recorder'
       ? '이 브라우저는 영상 만들기를 지원하지 않아요. 크롬/엣지에서 열어보세요.'
       : err.message === 'no-user-audio'
-        ? '먼저 아래에서 내 음원 파일을 골라주세요 📁'
+        ? '먼저 아래에서 내 음원 파일을 골라주세요.'
         : '영상을 만들다 문제가 생겼어요. 다시 한 번 눌러보세요.');
   }
   $('#btn-make-vlog').disabled = false;
@@ -993,13 +1117,12 @@ function downloadVlog() {
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
-/* ==================== 달력 ==================== */
+/* ==================== 달력 (홈 화면) ==================== */
 let calYM = '';
-function openCalendar() {
-  const cur = entries[pageIndex];
-  calYM = (cur ? cur.date : todayStr()).slice(0, 7);
-  renderCal();
-  $('#cal-back').classList.add('on');
+/** 달력을 특정 달로 세팅하고 홈 화면으로 이동 */
+function goCalendar(ym) {
+  calYM = ym || todayStr().slice(0, 7);
+  show('scr-cal');
 }
 function shiftCalMonth(d) {
   const [y, m] = calYM.split('-').map(Number);
@@ -1008,10 +1131,12 @@ function shiftCalMonth(d) {
   renderCal();
 }
 function renderCal() {
+  if (!calYM) calYM = todayStr().slice(0, 7);
   const [y, m] = calYM.split('-').map(Number);
   $('#cal-title').textContent = `${y}년 ${m}월`;
   const startDow = new Date(y, m - 1, 1).getDay();
   const days = new Date(y, m, 0).getDate();
+  const today = todayStr();
   const firstIdxByDay = new Map();
   entries.forEach((e, i) => {
     if (e.date.slice(0, 7) === calYM && !firstIdxByDay.has(e.date)) firstIdxByDay.set(e.date, i);
@@ -1021,15 +1146,20 @@ function renderCal() {
   for (let d = 1; d <= days; d++) {
     const ds = `${calYM}-${String(d).padStart(2, '0')}`;
     const idx = firstIdxByDay.get(ds);
-    html += idx !== undefined
-      ? `<button class="cal-day has" data-idx="${idx}">${d}<i></i></button>`
-      : `<span class="cal-day">${d}</span>`;
+    const isToday = ds === today;
+    if (idx !== undefined) {
+      html += `<button class="cal-day has${isToday ? ' today' : ''}" data-idx="${idx}">${d}<i></i></button>`;
+    } else if (isToday) {
+      // 기록 없는 오늘 → 눌러서 바로 오늘의 순간 담기
+      html += `<button class="cal-day today" data-today="1">${d}</button>`;
+    } else {
+      html += `<span class="cal-day">${d}</span>`;
+    }
   }
   $('#cal-grid').innerHTML = html;
 }
 function jumpToEntry(idx) {
   pageIndex = isMobile() ? idx : idx - (idx % 2);
-  $('#cal-back').classList.remove('on');
   playFx('flip');
   show('scr-book');
 }
@@ -1053,24 +1183,46 @@ async function wipeAll() {
   entries = [];
   pageIndex = 0;
   await initDB();
-  toast('모든 기록을 지웠어요. 새 마음으로 시작해요 🌱');
+  toast('모든 기록을 지웠어요. 새 마음으로 시작해요.');
   show('scr-cover');
 }
 
 /* ==================== 이벤트 바인딩 ==================== */
 function bind() {
-  $('#btn-open-book').onclick = () => show('scr-book');
-  $('#btn-close-book').onclick = () => show('scr-cover');
-  $('#btn-new').onclick = () => show('scr-capture');
-  $('#btn-cap-back').onclick = () => show('scr-book');
-  $('#btn-go-vlog').onclick = () => show('scr-vlog');
-  $('#btn-vlog-back').onclick = () => show('scr-book');
-  $('#btn-go-settings').onclick = () => show('scr-settings');
-  $('#btn-set-back').onclick = () => show('scr-book');
+  // 표지 → 달력(홈), 제목 클릭 → 표지
+  $('#btn-open-book').onclick = () => goCalendar(todayStr().slice(0, 7));
+  $('#cal-home-title').onclick = () => show('scr-cover');
+  $('#book-home-title').onclick = () => show('scr-cover');
 
+  // 달력 화면
+  $('#btn-cal-vlog').onclick = () => openSub('scr-vlog');
+  $('#btn-cal-settings').onclick = () => openSub('scr-settings');
+  $('#btn-cal-new').onclick = () => openSub('scr-capture');
+  $('#cal-prev').onclick = () => shiftCalMonth(-1);
+  $('#cal-next').onclick = () => shiftCalMonth(1);
+  $('#cal-grid').addEventListener('click', (e) => {
+    const day = e.target.closest('.cal-day');
+    if (!day) return;
+    if (day.dataset.today) { openSub('scr-capture'); return; }   // 기록 없는 오늘
+    if (day.classList.contains('has')) jumpToEntry(Number(day.dataset.idx));
+  });
+
+  // 책 화면
+  $('#btn-cal').onclick = () => goCalendar(calYM || (entries[pageIndex] ? entries[pageIndex].date.slice(0, 7) : todayStr().slice(0, 7)));
+  $('#btn-go-vlog').onclick = () => openSub('scr-vlog');
+  $('#btn-go-settings').onclick = () => openSub('scr-settings');
+  $('#btn-new').onclick = () => openSub('scr-capture');
+
+  // 하위 화면 돌아가기
+  $('#btn-cap-back').onclick = () => show(backTo);
+  $('#btn-vlog-back').onclick = () => show(backTo);
+  $('#btn-set-back').onclick = () => show(backTo);
+
+  // 책: 개별 삭제 / 빈 페이지 클릭 → 기록하기
   $('#book').addEventListener('click', (e) => {
-    const b = e.target.closest('.pg-del');
-    if (b) deleteEntryUI(b.dataset.id);
+    const del = e.target.closest('.pg-del');
+    if (del) { deleteEntryUI(del.dataset.id); return; }
+    if (e.target.closest('.pg-empty')) openSub('scr-capture');
   });
 
   $('#btn-prev').onclick = () => flip(-1);
@@ -1081,6 +1233,7 @@ function bind() {
     if (e.key === 'ArrowRight') flip(1);
   });
 
+  // 필터 / 촬영 모드 / 날씨 / 기분
   $$('#filter-row .chip').forEach((b) => {
     b.onclick = () => {
       $$('#filter-row .chip').forEach((x) => x.classList.remove('on'));
@@ -1090,18 +1243,21 @@ function bind() {
   });
   $$('#mode-toggle button').forEach((b) => {
     b.onclick = () => {
+      if (recording) return; // 녹화 중 모드 변경 금지
       $$('#mode-toggle button').forEach((x) => x.classList.remove('on'));
       b.classList.add('on');
       camMode = b.dataset.mode;
     };
   });
-  $$('.wchip').forEach((b) => {
+  const singlePick = (sel) => $$(sel).forEach((b) => {
     b.onclick = () => {
       const was = b.classList.contains('on');
-      $$('.wchip').forEach((x) => x.classList.remove('on'));
+      $$(sel).forEach((x) => x.classList.remove('on'));
       if (!was) b.classList.add('on');
     };
   });
+  singlePick('.wchip');
+  singlePick('.mchip');
 
   $('#btn-shutter').onclick = shutter;
   $('#btn-retake').onclick = retake;
@@ -1118,27 +1274,35 @@ function bind() {
   $('#stk-smaller').onclick = () => resizeSticker(0.8);
   $('#stk-delete').onclick = deleteSticker;
 
-  // 달력
-  $('#btn-cal').onclick = openCalendar;
-  $('#cal-prev').onclick = () => shiftCalMonth(-1);
-  $('#cal-next').onclick = () => shiftCalMonth(1);
-  $('#cal-close').onclick = () => $('#cal-back').classList.remove('on');
-  $('#cal-back').addEventListener('click', (e) => {
-    if (e.target.id === 'cal-back') $('#cal-back').classList.remove('on');
-    const day = e.target.closest('.cal-day.has');
-    if (day) jumpToEntry(Number(day.dataset.idx));
+  // 브이로그 편집기 (달 선택 / 길이 / 장면 포함·순서)
+  $('#vlog-month').onchange = buildClipList;
+  $$('#vlog-len button').forEach((b) => {
+    b.onclick = () => {
+      $$('#vlog-len button').forEach((x) => x.classList.remove('on'));
+      b.classList.add('on');
+      vlogTargetSec = Number(b.dataset.len);
+    };
+  });
+  $('#clip-list').addEventListener('click', (e) => {
+    const up = e.target.closest('.clip-up'), down = e.target.closest('.clip-down');
+    if (up) moveClip(Number(up.dataset.i), -1);
+    else if (down) moveClip(Number(down.dataset.i), 1);
+  });
+  $('#clip-list').addEventListener('change', (e) => {
+    const chk = e.target.closest('.clip-chk');
+    if (chk) toggleClip(Number(chk.dataset.i), chk.checked);
   });
 
   // 브이로그 소리 옵션
-  $('#vlog-bgm').onchange = () => {
+  $('#vlog-bgm').addEventListener('change', () => {
     $('#user-audio-row').classList.toggle('hidden', $('#vlog-bgm').value !== 'user');
-  };
+  });
   $('#vlog-user-audio').onchange = async () => {
     const file = $('#vlog-user-audio').files[0];
     if (!file) return;
     userAudioData = await file.arrayBuffer();
     userAudioName = file.name;
-    $('#user-audio-name').textContent = `🎵 ${file.name} — 이 음원의 이용 범위(상업용 가능 여부)를 꼭 확인해 주세요`;
+    $('#user-audio-name').textContent = `${file.name} — 이 음원의 이용 범위(상업용 가능 여부)를 꼭 확인해 주세요`;
   };
 
   // 효과음 설정
@@ -1182,16 +1346,16 @@ window.__diary = {
 
   buildVlog,
   speechSupported,
-  camState: () => ({ hasStream: !!camStream, filter: camFilter, mode: camMode, captured: captured ? captured.kind : null }),
+  camState: () => ({ hasStream: !!camStream, filter: camFilter, mode: camMode, recording, captured: (captured && captured.blob) ? captured.kind : null }),
   // 시드용: dataURL을 blob으로 바꿔 엔트리 저장
-  async addEntry({ date, text = '', weather = '', filter = 'none', kind = 'none', dataURL = null, stickers = [] }) {
+  async addEntry({ date, text = '', weather = '', mood = '', filter = 'none', kind = 'none', dataURL = null, stickers = [], durMs = 0 }) {
     let blob = null, thumb = null;
     if (dataURL) {
       blob = await (await fetch(dataURL)).blob();
       thumb = dataURL;
       if (kind === 'none') kind = 'photo';
     }
-    const entry = { id: uid(), date: date || todayStr(), ts: Date.now(), kind, blob, thumb, filter, weather, stickers, text };
+    const entry = { id: uid(), date: date || todayStr(), ts: Date.now(), kind, blob, thumb, filter, durMs, weather, mood, stickers, text };
     await dbPut(entry);
     entries.push(entry);
     sortEntries();
@@ -1200,8 +1364,14 @@ window.__diary = {
   // 꾸미기·달력·소리 훅
   addSticker,
   getStickers: () => capStickers.slice(),
-  openCalendar,
+  goCalendar,
   jumpToEntry,
+  // 영상 토글 녹화 (테스트: startVideoRec 후 원하는 시간 뒤 stopVideoRec)
+  startVideoRec, stopVideoRec,
+  isRecording: () => recording,
+  // 브이로그 편집기
+  getClips: () => vlogClips.map((c) => ({ ...c })),
+  moveClip, toggleClip, setTarget: (s) => { vlogTargetSec = s; },
   _lastVlogAudioTracks: -1,
   // 배경음악이 실제 소리를 내는지 오프라인 렌더로 검증 (평균 진폭 반환)
   async bgmSample(name) {

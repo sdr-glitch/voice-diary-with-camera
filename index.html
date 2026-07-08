@@ -16,27 +16,47 @@
 </head>
 <body>
 
-<!-- ============ 1) 표지 ============ -->
+<!-- ============ 1) 표지 (눌러서 진입) ============ -->
 <section id="scr-cover" class="screen">
-  <button class="cover-book" id="btn-open-book" aria-label="일기장 펼치기">
+  <button class="cover-book" id="btn-open-book" aria-label="일기장 열기">
     <span class="stitch" aria-hidden="true"></span>
-    <div class="cover-emblem">📖</div>
     <div class="cover-title">순간일기</div>
     <div class="cover-sub">목소리와 풍경으로 쓰는 하루</div>
-    <div class="cover-open-hint">눌러서 펼치기</div>
   </button>
   <div class="cover-count" id="cover-count"></div>
 </section>
 
-<!-- ============ 2) 책 (스프레드) ============ -->
+<!-- ============ 2) 달력 (홈) ============ -->
+<section id="scr-cal" class="screen hidden">
+  <div class="book-top">
+    <h1 class="app-title" id="cal-home-title">순간일기</h1>
+    <div class="top-btns">
+      <button class="tbtn" id="btn-cal-vlog">월말 브이로그</button>
+      <button class="tbtn" id="btn-cal-settings">설정</button>
+    </div>
+  </div>
+
+  <div class="cal-screen-card">
+    <div class="cal-head">
+      <button class="nav-arrow sm" id="cal-prev" aria-label="이전 달">◀</button>
+      <span id="cal-title"></span>
+      <button class="nav-arrow sm" id="cal-next" aria-label="다음 달">▶</button>
+    </div>
+    <div class="cal-grid" id="cal-grid"></div>
+    <p class="cal-hint" id="cal-hint">오늘 날짜를 누르면 오늘의 순간을 담을 수 있어요. 기록이 있는 날은 눌러서 다시 볼 수 있어요.</p>
+  </div>
+
+  <button id="btn-cal-new" class="tbtn primary big-cta">오늘의 순간 담기</button>
+</section>
+
+<!-- ============ 3) 책 (스프레드) ============ -->
 <section id="scr-book" class="screen hidden">
   <div class="book-top">
-    <h1>📖 순간일기</h1>
+    <h1 class="app-title" id="book-home-title">순간일기</h1>
     <div class="top-btns">
-      <button class="tbtn" id="btn-cal">📅 달력</button>
-      <button class="tbtn" id="btn-go-vlog">🎬 월말 브이로그</button>
-      <button class="tbtn" id="btn-go-settings">⚙️</button>
-      <button class="tbtn" id="btn-close-book">표지로</button>
+      <button class="tbtn" id="btn-cal">달력</button>
+      <button class="tbtn" id="btn-go-vlog">월말 브이로그</button>
+      <button class="tbtn" id="btn-go-settings">설정</button>
     </div>
   </div>
 
@@ -51,14 +71,14 @@
     <button class="nav-arrow" id="btn-next" aria-label="다음 페이지">▶</button>
   </div>
 
-  <button id="btn-new" aria-label="오늘 기록하기">✍️</button>
+  <button id="btn-new" aria-label="오늘의 순간 담기">＋</button>
 </section>
 
-<!-- ============ 3) 기록 (카메라 + 음성) ============ -->
+<!-- ============ 4) 기록 (카메라 + 음성) ============ -->
 <section id="scr-capture" class="screen hidden">
   <div class="cap-head">
-    <h2>✍️ 오늘의 순간 담기</h2>
-    <button class="tbtn" id="btn-cap-back">← 돌아가기</button>
+    <h2>오늘의 순간 담기</h2>
+    <button class="tbtn" id="btn-cap-back">돌아가기</button>
   </div>
 
   <div class="cap-card">
@@ -68,34 +88,33 @@
       <video id="cap-preview-video" class="hidden" playsinline muted loop></video>
       <img id="cap-preview-img" class="hidden" alt="촬영한 사진 미리보기">
       <div class="cam-msg hidden" id="cam-msg">
-        <div class="big">📷</div>
         <p id="cam-msg-text">카메라를 준비하고 있어요…</p>
       </div>
-      <div class="rec-dot" id="rec-dot">녹화 중</div>
+      <div class="rec-dot" id="rec-dot"><span id="rec-time">0초</span></div>
       <div id="sticker-layer"></div>
     </div>
 
     <!-- 필터 -->
     <div class="chip-row" id="filter-row" aria-label="필터 선택">
       <button class="chip" data-filter="none">필터 없음</button>
-      <button class="chip on" data-filter="vintage">🎞️ 빈티지</button>
-      <button class="chip" data-filter="colorpop">🌈 색감 강조</button>
-      <button class="chip" data-filter="fisheye">🔮 볼록거울</button>
+      <button class="chip on" data-filter="vintage">빈티지</button>
+      <button class="chip" data-filter="colorpop">색감 강조</button>
+      <button class="chip" data-filter="fisheye">볼록거울</button>
     </div>
 
     <!-- 촬영 -->
     <div class="cap-controls">
       <div class="mode-toggle" id="mode-toggle">
-        <button data-mode="photo" class="on">📷 사진</button>
-        <button data-mode="video">🎥 2초 영상</button>
+        <button data-mode="photo" class="on">사진</button>
+        <button data-mode="video">영상</button>
       </div>
-      <button id="btn-shutter" aria-label="촬영">📸</button>
+      <button id="btn-shutter" aria-label="촬영"><span class="shutter-ring"></span></button>
       <button id="btn-retake" class="tbtn hidden">다시 찍기</button>
     </div>
 
     <!-- 꾸미기 (촬영 후에만 표시) -->
     <div id="deco-box" class="hidden">
-      <span class="lbl">🎀 꾸미기 — 스티커를 눌러 붙이고, 손가락으로 끌어서 옮겨보세요</span>
+      <span class="lbl">꾸미기 — 스티커를 눌러 붙이고, 손가락으로 끌어서 옮겨보세요</span>
       <div class="chip-row" id="sticker-palette">
         <button class="schip">⭐</button><button class="schip">✨</button>
         <button class="schip">💖</button><button class="schip">🌸</button>
@@ -105,24 +124,38 @@
         <button class="schip">🔥</button><button class="schip">🎵</button>
       </div>
       <div class="deco-controls hidden" id="deco-controls">
-        <button class="tbtn" id="stk-bigger">➕ 크게</button>
-        <button class="tbtn" id="stk-smaller">➖ 작게</button>
-        <button class="tbtn danger" id="stk-delete">🗑️ 이 스티커 빼기</button>
+        <button class="tbtn" id="stk-bigger">크게</button>
+        <button class="tbtn" id="stk-smaller">작게</button>
+        <button class="tbtn danger" id="stk-delete">이 스티커 빼기</button>
       </div>
     </div>
 
     <!-- 음성 → 텍스트 -->
     <div class="voice-row">
-      <button id="btn-mic" aria-label="음성으로 말하기">🎙️</button>
+      <button id="btn-mic" aria-label="음성으로 말하기">음성</button>
       <div class="voice-col">
-        <textarea id="diary-text" placeholder="🎙️ 버튼을 누르고 지금의 느낌을 말해보세요. 말한 내용이 여기에 글로 적혀요. 직접 입력해도 좋아요."></textarea>
+        <textarea id="diary-text" placeholder="'음성' 버튼을 누르고 지금의 느낌을 말해보세요. 말한 내용이 여기에 글로 적혀요. 직접 입력해도 좋아요."></textarea>
         <span id="voice-status"></span>
+      </div>
+    </div>
+
+    <!-- 오늘의 기분 -->
+    <div class="pick-row" id="mood-row">
+      <span class="lbl">오늘의 기분</span>
+      <div class="chip-row">
+        <button class="mchip" data-mood="설렘">설렘</button>
+        <button class="mchip" data-mood="행복">행복</button>
+        <button class="mchip" data-mood="평온">평온</button>
+        <button class="mchip" data-mood="그저그럼">그저 그럼</button>
+        <button class="mchip" data-mood="지침">지침</button>
+        <button class="mchip" data-mood="울적">울적</button>
+        <button class="mchip" data-mood="속상">속상</button>
       </div>
     </div>
 
     <!-- 날씨 -->
     <div class="weather-row">
-      <span class="lbl">지금 날씨는?</span>
+      <span class="lbl">오늘 날씨</span>
       <button class="wchip" data-weather="☀️">☀️</button>
       <button class="wchip" data-weather="⛅">⛅</button>
       <button class="wchip" data-weather="🌧️">🌧️</button>
@@ -131,31 +164,49 @@
     </div>
 
     <div class="cap-actions">
-      <button class="tbtn primary" id="btn-save-entry">📖 일기장에 붙이기</button>
+      <button class="tbtn primary" id="btn-save-entry">일기장에 붙이기</button>
     </div>
   </div>
 </section>
 
-<!-- ============ 4) 월말 브이로그 ============ -->
+<!-- ============ 5) 월말 브이로그 ============ -->
 <section id="scr-vlog" class="screen hidden">
   <div class="cap-head">
-    <h2>🎬 월말 브이로그</h2>
-    <button class="tbtn" id="btn-vlog-back">← 돌아가기</button>
+    <h2>월말 브이로그</h2>
+    <button class="tbtn" id="btn-vlog-back">돌아가기</button>
   </div>
 
   <div class="vlog-card">
-    <p class="desc">한 달 동안 담은 사진과 짧은 영상을 이어 붙여, 1일부터 마지막 날까지의 여정을 짧은 영상으로 만들어 드려요. 만드는 데 몇십 초 정도 걸릴 수 있어요.</p>
+    <p class="desc">한 달 동안 담은 사진과 영상을 이어 붙여, 그달의 여정을 한 편의 영상으로 만들어 드려요. 아래에서 넣을 장면과 순서를 고르고, 길이를 정한 뒤 만들어 보세요.</p>
     <div class="vlog-pick">
       <select id="vlog-month" aria-label="브이로그를 만들 달 선택"></select>
-      <button class="tbtn primary" id="btn-make-vlog">만들기</button>
     </div>
+
+    <!-- 간단 편집기 -->
+    <div class="vlog-edit">
+      <label class="vlog-audio-row lbl">제목
+        <input type="text" id="vlog-title" maxlength="24" placeholder="예) 7월의 기록">
+      </label>
+      <div class="vlog-audio-row">
+        <span class="lbl">전체 길이</span>
+        <div class="mode-toggle" id="vlog-len">
+          <button data-len="30">30초</button>
+          <button data-len="60" class="on">1분</button>
+          <button data-len="90">1분 30초</button>
+        </div>
+      </div>
+      <span class="lbl">넣을 장면 (끌어서 순서를 바꿀 수 있어요 · 체크를 풀면 빠져요)</span>
+      <ul class="clip-list" id="clip-list"></ul>
+    </div>
+
+    <!-- 소리 -->
     <div class="vlog-audio">
       <div class="vlog-audio-row">
-        <span class="lbl">🎵 배경음악</span>
+        <span class="lbl">배경음악</span>
         <select id="vlog-bgm" aria-label="배경음악 선택">
-          <option value="piano">🎹 잔잔한 피아노 (기본 · 자체 제작)</option>
-          <option value="musicbox">🎐 포근한 오르골 (기본 · 자체 제작)</option>
-          <option value="user">📁 내 음원 파일 사용</option>
+          <option value="piano">잔잔한 피아노 (기본 · 자체 제작)</option>
+          <option value="musicbox">포근한 오르골 (기본 · 자체 제작)</option>
+          <option value="user">내 음원 파일 사용</option>
           <option value="none">배경음악 없음</option>
         </select>
       </div>
@@ -166,22 +217,24 @@
       <label class="vlog-audio-row lbl"><input type="checkbox" id="vlog-fx" checked> 장면이 바뀔 때 작은 효과음 넣기 (자체 제작)</label>
       <p class="desc">기본 배경음악과 효과음은 <b>이 앱이 그 자리에서 직접 만들어내는 소리</b>예요. 남의 음원을 쓰지 않으므로 저작권 걱정 없이 상업적으로도 자유롭게 쓸 수 있어요. 내 음원 파일을 쓸 때는 그 음원의 이용 범위를 꼭 확인해 주세요.</p>
     </div>
+
+    <button class="tbtn primary" id="btn-make-vlog">만들기</button>
     <div id="vlog-progress">
       <div class="bar-wrap"><div id="vlog-bar"></div></div>
       <span id="vlog-step"></span>
     </div>
     <div id="vlog-result">
       <video id="vlog-video" controls playsinline></video>
-      <button class="tbtn primary" id="btn-vlog-save">⬇️ 영상 파일로 저장</button>
+      <button class="tbtn primary" id="btn-vlog-save">영상 파일로 저장</button>
     </div>
   </div>
 </section>
 
-<!-- ============ 5) 설정 ============ -->
+<!-- ============ 6) 설정 ============ -->
 <section id="scr-settings" class="screen hidden">
   <div class="cap-head">
-    <h2>⚙️ 설정</h2>
-    <button class="tbtn" id="btn-set-back">← 돌아가기</button>
+    <h2>설정</h2>
+    <button class="tbtn" id="btn-set-back">돌아가기</button>
   </div>
   <div class="set-card">
     <h2>이 앱은요</h2>
@@ -195,23 +248,9 @@
   <div class="set-card">
     <h2>데이터 관리</h2>
     <p id="set-stats"></p>
-    <button class="tbtn danger" id="btn-wipe">🗑️ 모든 기록 지우기</button>
+    <button class="tbtn danger" id="btn-wipe">모든 기록 지우기</button>
   </div>
 </section>
-
-<!-- 달력 모달 -->
-<div id="cal-back">
-  <div class="cal-box">
-    <div class="cal-head">
-      <button class="nav-arrow sm" id="cal-prev" aria-label="이전 달">◀</button>
-      <span id="cal-title"></span>
-      <button class="nav-arrow sm" id="cal-next" aria-label="다음 달">▶</button>
-      <button class="tbtn" id="cal-close">닫기</button>
-    </div>
-    <div class="cal-grid" id="cal-grid"></div>
-    <p class="cal-hint">🟠 점이 있는 날을 누르면 그날 일기로 바로 넘어가요</p>
-  </div>
-</div>
 
 <!-- 공통: 토스트 / 확인 모달 -->
 <div id="toast" role="status"></div>

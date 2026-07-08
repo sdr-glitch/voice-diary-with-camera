@@ -126,7 +126,9 @@ textarea, select, input { font-family: inherit; }
   font-family: var(--serif); font-size: 19px; letter-spacing: .06em; font-weight: 600;
   display: flex; align-items: center; gap: 8px;
 }
-.book-top .top-btns { display: flex; gap: 8px; }
+.app-title { cursor: pointer; }
+.app-title:hover { color: var(--accent); }
+.book-top .top-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 .tbtn {
   border: 1px solid var(--line); background: var(--paper);
@@ -160,18 +162,15 @@ textarea, select, input { font-family: inherit; }
 .page {
   flex: 1 1 0; min-width: 0;
   aspect-ratio: 3 / 4.1;
-  background:
-    repeating-linear-gradient(180deg, transparent 0 27px, var(--line) 27px 28px),
-    linear-gradient(180deg, var(--paper) 0%, var(--paper-2) 100%);
-  background-position: 0 190px, 0 0;
-  padding: 16px 16px 40px;
+  background: linear-gradient(180deg, var(--paper) 0%, var(--paper-2) 100%);
+  padding: 18px 18px 42px;
   position: relative;
   overflow: hidden;
-  display: flex; flex-direction: column; gap: 10px;
+  display: flex; flex-direction: column; gap: 12px;
   will-change: transform;
 }
-.page.left  { border-radius: 8px 2px 2px 8px; box-shadow: inset -14px 0 22px -14px rgba(0,0,0,.35); }
-.page.right { border-radius: 2px 8px 8px 2px; box-shadow: inset 14px 0 22px -14px rgba(0,0,0,.35); }
+.page.left  { border-radius: 8px 2px 2px 8px; }
+.page.right { border-radius: 2px 8px 8px 2px; }
 
 /* 페이지 넘김 — 2D 변환만 사용 (3D rotate는 환경에 따라 뭉개짐: 프로젝트 철칙) */
 @keyframes pg-out-next { from { transform: scaleX(1); } to { transform: scaleX(0); } }
@@ -182,11 +181,11 @@ textarea, select, input { font-family: inherit; }
 .page.left.flip-in   { transform-origin: right center; animation: pg-in-next  .22s ease-out; }
 
 .pg-date {
-  font-family: var(--serif); font-size: 15px; font-weight: 600;
+  font-family: var(--serif); font-size: 16px; font-weight: 600;
   display: flex; align-items: center; gap: 8px; color: var(--ink);
 }
-.pg-date .pg-weather { font-size: 18px; }
 .pg-date .pg-dow { font-size: 12px; color: var(--ink-soft); font-weight: 400; }
+.pg-meta { font-size: 12px; color: var(--ink-soft); margin-top: -4px; }
 
 .pg-media {
   width: 100%;
@@ -211,7 +210,7 @@ textarea, select, input { font-family: inherit; }
 }
 .pg-text {
   font-family: var(--serif);
-  font-size: 14px; line-height: 28px;
+  font-size: 14px; line-height: 1.95;
   white-space: pre-wrap; word-break: break-word;
   color: var(--ink);
   overflow-y: auto;
@@ -223,11 +222,20 @@ textarea, select, input { font-family: inherit; }
 .page.left  .pg-num { left: 16px; }
 .page.right .pg-num { right: 16px; }
 
+/* 빈 페이지 — 눌러서 오늘의 순간 담기로 */
 .pg-empty {
-  flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 10px; color: var(--ink-dim); text-align: center;
+  flex: 1; width: 100%; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 12px; color: var(--ink-dim); text-align: center;
+  border: 2px dashed var(--line); border-radius: 12px; background: transparent;
+  cursor: pointer; transition: background .15s ease, border-color .15s ease;
 }
-.pg-empty .big { font-size: 40px; }
+.pg-empty:hover { background: rgba(176,113,63,.06); border-color: var(--accent-soft); }
+.pg-empty-plus {
+  width: 52px; height: 52px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30px; color: var(--accent);
+  border: 2px solid var(--accent-soft);
+}
 .pg-empty p { font-size: 13px; line-height: 1.8; }
 
 /* 넘김 내비 */
@@ -247,10 +255,11 @@ textarea, select, input { font-family: inherit; }
 /* 기록 개별 삭제 */
 .pg-del {
   position: absolute; top: 12px; right: 12px;
-  border: none; background: transparent; font-size: 14px;
-  opacity: .3; transition: opacity .15s ease;
+  border: 1px solid var(--line); background: rgba(255,255,255,.7);
+  color: var(--ink-soft); font-size: 11px; padding: 3px 9px; border-radius: 999px;
+  opacity: .55; transition: opacity .15s ease;
 }
-.pg-del:hover { opacity: .9; }
+.pg-del:hover { opacity: 1; color: var(--band); }
 .page.left .pg-del { right: auto; left: 12px; }
 
 /* 기록 추가 플로팅 버튼 */
@@ -328,20 +337,32 @@ textarea, select, input { font-family: inherit; }
 #btn-shutter {
   width: 66px; height: 66px; border-radius: 50%;
   border: 4px solid var(--ink);
-  background: radial-gradient(circle at 35% 30%, #fff, #ddd6c6);
-  font-size: 22px;
+  background: #fff;
+  display: flex; align-items: center; justify-content: center;
   transition: transform .12s ease;
+}
+#btn-shutter .shutter-ring {
+  width: 46px; height: 46px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff, #ddd6c6);
+  border: 1px solid rgba(0,0,0,.12);
+  transition: all .15s ease;
+}
+/* 영상 녹화 중이면 빨간 정지 사각형 */
+#btn-shutter.recording .shutter-ring {
+  width: 26px; height: 26px; border-radius: 6px;
+  background: var(--band); border-color: var(--band);
 }
 #btn-shutter:active { transform: scale(.9); }
 #btn-shutter:disabled { opacity: .4; }
 #btn-retake { font-size: 13px; }
+#rec-time { font-variant-numeric: tabular-nums; }
 
 /* 음성/텍스트 입력 */
 .voice-row { display: flex; gap: 10px; align-items: flex-start; }
 #btn-mic {
   flex-shrink: 0;
   width: 54px; height: 54px; border-radius: 50%; border: 2px solid var(--ink);
-  background: #fff; font-size: 22px;
+  background: #fff; font-size: 13px; color: var(--ink);
   transition: transform .12s ease;
 }
 #btn-mic.on {
@@ -359,7 +380,14 @@ textarea, select, input { font-family: inherit; }
 #voice-status { font-size: 12px; color: var(--ink-soft); min-height: 16px; }
 #voice-status.err { color: var(--warn); }
 
-/* 날씨 선택 */
+/* 기분 / 날씨 선택 */
+.pick-row { display: flex; flex-direction: column; gap: 8px; }
+.pick-row .lbl { font-size: 13px; color: var(--ink-soft); }
+.mchip {
+  border: 1px solid var(--line); background: #fff; color: var(--ink);
+  border-radius: 999px; padding: 7px 13px; font-size: 13px;
+}
+.mchip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .weather-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .weather-row .lbl { font-size: 13px; color: var(--ink-soft); }
 .wchip {
@@ -470,18 +498,15 @@ textarea, select, input { font-family: inherit; }
 }
 
 /* ============================================================
-   7) 달력 모달
+   7) 달력 (홈 화면)
    ============================================================ */
-#cal-back {
-  position: fixed; inset: 0; background: rgba(40,32,22,.5); z-index: 80;
-  display: none; align-items: center; justify-content: center; padding: 20px;
-  backdrop-filter: blur(3px);
-}
-#cal-back.on { display: flex; }
-.cal-box {
+#scr-cal { justify-content: flex-start; padding-top: 18px; gap: 16px; }
+.cal-screen-card {
+  width: min(460px, 96vw);
   background: var(--paper); border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 18px; width: min(400px, 94vw); display: flex; flex-direction: column; gap: 12px;
+  padding: 18px; display: flex; flex-direction: column; gap: 14px;
 }
+.big-cta { width: min(460px, 96vw); padding: 15px; font-size: 16px; text-align: center; }
 .cal-head { display: flex; align-items: center; gap: 10px; }
 .cal-head span { flex: 1; text-align: center; font-family: var(--serif); font-weight: 600; font-size: 16px; }
 .nav-arrow.sm { width: 36px; height: 36px; font-size: 13px; }
@@ -502,7 +527,45 @@ button.cal-day.has:hover { background: var(--accent-soft); }
   position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
   width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
 }
-.cal-hint { font-size: 12px; color: var(--ink-soft); text-align: center; }
+/* 오늘 — 눌러서 바로 기록 */
+button.cal-day.today {
+  color: #fff; font-weight: 700; cursor: pointer;
+  background: linear-gradient(135deg, var(--accent), #96501f);
+}
+button.cal-day.today i { background: #fff; }
+.cal-hint { font-size: 12px; color: var(--ink-soft); text-align: center; line-height: 1.7; }
+
+/* 브이로그 간단 편집기 */
+.vlog-edit {
+  display: flex; flex-direction: column; gap: 10px;
+  border-top: 1px dashed var(--line); padding-top: 12px;
+}
+.vlog-edit .lbl { font-size: 13px; color: var(--ink-soft); }
+#vlog-title {
+  flex: 1; border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 11px; font-size: 14px; background: #fffdf7; color: var(--ink);
+}
+#vlog-len button { padding: 7px 12px; font-size: 13px; }
+.clip-list { list-style: none; display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.clip-item {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; background: #fffdf7;
+}
+.clip-item.off { opacity: .45; }
+.clip-chk { width: 18px; height: 18px; flex-shrink: 0; }
+.clip-thumb { width: 44px; height: 44px; border-radius: 6px; overflow: hidden; flex-shrink: 0;
+  background: var(--paper-2); display: flex; align-items: center; justify-content: center; }
+.clip-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.clip-noimg { font-size: 12px; color: var(--ink-soft); }
+.clip-info { flex: 1; font-size: 12px; line-height: 1.5; color: var(--ink); min-width: 0; }
+.clip-info em { color: var(--ink-soft); font-style: normal; font-size: 11px; }
+.clip-move { display: flex; flex-direction: column; gap: 2px; }
+.clip-move button {
+  border: 1px solid var(--line); background: #fff; color: var(--ink-soft);
+  width: 26px; height: 20px; border-radius: 6px; font-size: 10px; line-height: 1;
+}
+.clip-move button:disabled { opacity: .3; }
+.clip-empty { font-size: 13px; color: var(--ink-soft); text-align: center; padding: 12px; }
 
 /* ============================================================
    8) 브이로그 소리 옵션
@@ -529,15 +592,6 @@ button.cal-day.has:hover { background: var(--accent-soft); }
   border: 2px dashed rgba(246,241,231,.3);
   border-radius: 8px 14px 14px 8px;
 }
-/* 책 속지 단면(겹친 페이지) 연출 */
-.page.left {
-  box-shadow: inset -14px 0 22px -14px rgba(0,0,0,.35),
-    -2px 0 0 #fffdf7, -4px 0 0 var(--paper-2), -6px 0 0 #fffdf7, -7px 0 0 rgba(60,45,25,.28);
-}
-.page.right {
-  box-shadow: inset 14px 0 22px -14px rgba(0,0,0,.35),
-    2px 0 0 #fffdf7, 4px 0 0 var(--paper-2), 6px 0 0 #fffdf7, 7px 0 0 rgba(60,45,25,.28);
-}
 /* 키보드 접근성 (스토어 심사 대비) */
 button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible {
   outline: 3px solid var(--accent-soft); outline-offset: 2px;
@@ -553,8 +607,9 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-
 @media (max-width: 720px) {
   .book { width: min(440px, 96vw); }
   .page.left { display: none; }
-  .page.right { border-radius: 8px; box-shadow: inset 8px 0 16px -10px rgba(0,0,0,.3); }
+  .page.right { border-radius: 8px; }
   .book::after { display: none; }
-  .book-top h1 { font-size: 16px; }
+  .book-top h1 { font-size: 17px; }
   .tbtn { padding: 7px 11px; font-size: 12px; }
+  .cal-screen-card, .vlog-card, .set-card, .cap-card { width: 96vw; }
 }
