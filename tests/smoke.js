@@ -155,6 +155,15 @@ function ok(cond, name) {
   list = await page.evaluate(() => window.__diary.getEntries());
   ok(list.length === 0, '모든 기록 삭제');
 
+  console.log('\n[12] PWA 구성 (manifest·아이콘·서비스 워커)');
+  const fs = require('fs');
+  const root = path.resolve(__dirname, '..');
+  ok(await page.$('link[rel="manifest"]') !== null, 'manifest 링크 존재');
+  const mf = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+  ok(mf.name && mf.icons && mf.icons.length >= 2 && mf.display === 'standalone', 'manifest 필수 필드');
+  ok(fs.existsSync(path.join(root, 'icon-192.png')) && fs.existsSync(path.join(root, 'icon-512.png')), '앱 아이콘 파일 존재');
+  ok(fs.existsSync(path.join(root, 'sw.js')), '서비스 워커 파일 존재 (file://에선 등록 스킵)');
+
   console.log('\n[콘솔/페이지 에러]');
   // 외부 네트워크 차단(폰트 등)은 앱 오류 아님 — 비차단 로드라 렌더링 영향 없음
   const realErrors = errors.filter((e) =>

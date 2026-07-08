@@ -851,6 +851,10 @@ async function init() {
   sortEntries();
   pageIndex = maxIndex();
   renderCoverCount();
+  // 오프라인 캐시 — https에서만 (file://은 서비스 워커 미지원이라 스킵)
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
 }
 const readyPromise = init();
 
