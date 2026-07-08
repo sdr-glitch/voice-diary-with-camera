@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>순간일기 — 목소리와 풍경으로 쓰는 하루</title>
+<meta name="description" content="음성으로 오늘의 느낌을 말하면 글이 되고, 카메라로 지금 보는 풍경을 담는 책 모양 일기장. 월말엔 한 달의 여정을 짧은 브이로그로.">
+<meta name="theme-color" content="#7a5c44">
+<!-- 폰트는 렌더링 비차단 로드 (head를 막으면 흰 화면 — 프로젝트 철칙) -->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ 1) 표지 ============ -->
+<section id="scr-cover" class="screen">
+  <button class="cover-book" id="btn-open-book" aria-label="일기장 펼치기">
+    <div class="cover-emblem">📖</div>
+    <div class="cover-title">순간일기</div>
+    <div class="cover-sub">목소리와 풍경으로 쓰는 하루</div>
+    <div class="cover-open-hint">눌러서 펼치기</div>
+  </button>
+  <div class="cover-count" id="cover-count"></div>
+</section>
+
+<!-- ============ 2) 책 (스프레드) ============ -->
+<section id="scr-book" class="screen hidden">
+  <div class="book-top">
+    <h1>📖 순간일기</h1>
+    <div class="top-btns">
+      <button class="tbtn" id="btn-go-vlog">🎬 월말 브이로그</button>
+      <button class="tbtn" id="btn-go-settings">⚙️</button>
+      <button class="tbtn" id="btn-close-book">표지로</button>
+    </div>
+  </div>
+
+  <div class="book" id="book">
+    <div class="page left" id="page-left"></div>
+    <div class="page right" id="page-right"></div>
+  </div>
+
+  <div class="book-nav">
+    <button class="nav-arrow" id="btn-prev" aria-label="이전 페이지">◀</button>
+    <span id="pg-indicator"></span>
+    <button class="nav-arrow" id="btn-next" aria-label="다음 페이지">▶</button>
+  </div>
+
+  <button id="btn-new" aria-label="오늘 기록하기">✍️</button>
+</section>
+
+<!-- ============ 3) 기록 (카메라 + 음성) ============ -->
+<section id="scr-capture" class="screen hidden">
+  <div class="cap-head">
+    <h2>✍️ 오늘의 순간 담기</h2>
+    <button class="tbtn" id="btn-cap-back">← 돌아가기</button>
+  </div>
+
+  <div class="cap-card">
+    <!-- 카메라 무대 -->
+    <div class="cam-stage">
+      <canvas id="cam-canvas"></canvas>
+      <video id="cap-preview-video" class="hidden" playsinline muted loop></video>
+      <img id="cap-preview-img" class="hidden" alt="촬영한 사진 미리보기">
+      <div class="cam-msg hidden" id="cam-msg">
+        <div class="big">📷</div>
+        <p id="cam-msg-text">카메라를 준비하고 있어요…</p>
+      </div>
+      <div class="rec-dot" id="rec-dot">녹화 중</div>
+    </div>
+
+    <!-- 필터 -->
+    <div class="chip-row" id="filter-row" aria-label="필터 선택">
+      <button class="chip" data-filter="none">필터 없음</button>
+      <button class="chip on" data-filter="vintage">🎞️ 빈티지</button>
+      <button class="chip" data-filter="colorpop">🌈 색감 강조</button>
+      <button class="chip" data-filter="fisheye">🔮 볼록거울</button>
+    </div>
+
+    <!-- 촬영 -->
+    <div class="cap-controls">
+      <div class="mode-toggle" id="mode-toggle">
+        <button data-mode="photo" class="on">📷 사진</button>
+        <button data-mode="video">🎥 2초 영상</button>
+      </div>
+      <button id="btn-shutter" aria-label="촬영">📸</button>
+      <button id="btn-retake" class="tbtn hidden">다시 찍기</button>
+    </div>
+
+    <!-- 음성 → 텍스트 -->
+    <div class="voice-row">
+      <button id="btn-mic" aria-label="음성으로 말하기">🎙️</button>
+      <div class="voice-col">
+        <textarea id="diary-text" placeholder="🎙️ 버튼을 누르고 지금의 느낌을 말해보세요. 말한 내용이 여기에 글로 적혀요. 직접 입력해도 좋아요."></textarea>
+        <span id="voice-status"></span>
+      </div>
+    </div>
+
+    <!-- 날씨 -->
+    <div class="weather-row">
+      <span class="lbl">지금 날씨는?</span>
+      <button class="wchip" data-weather="☀️">☀️</button>
+      <button class="wchip" data-weather="⛅">⛅</button>
+      <button class="wchip" data-weather="🌧️">🌧️</button>
+      <button class="wchip" data-weather="🌨️">🌨️</button>
+      <button class="wchip" data-weather="🌙">🌙</button>
+    </div>
+
+    <div class="cap-actions">
+      <button class="tbtn primary" id="btn-save-entry">📖 일기장에 붙이기</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4) 월말 브이로그 ============ -->
+<section id="scr-vlog" class="screen hidden">
+  <div class="cap-head">
+    <h2>🎬 월말 브이로그</h2>
+    <button class="tbtn" id="btn-vlog-back">← 돌아가기</button>
+  </div>
+
+  <div class="vlog-card">
+    <p class="desc">한 달 동안 담은 사진과 짧은 영상을 이어 붙여, 1일부터 마지막 날까지의 여정을 짧은 영상으로 만들어 드려요. 만드는 데 몇십 초 정도 걸릴 수 있어요.</p>
+    <div class="vlog-pick">
+      <select id="vlog-month" aria-label="브이로그를 만들 달 선택"></select>
+      <button class="tbtn primary" id="btn-make-vlog">만들기</button>
+    </div>
+    <div id="vlog-progress">
+      <div class="bar-wrap"><div id="vlog-bar"></div></div>
+      <span id="vlog-step"></span>
+    </div>
+    <div id="vlog-result">
+      <video id="vlog-video" controls playsinline></video>
+      <button class="tbtn primary" id="btn-vlog-save">⬇️ 영상 파일로 저장</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5) 설정 ============ -->
+<section id="scr-settings" class="screen hidden">
+  <div class="cap-head">
+    <h2>⚙️ 설정</h2>
+    <button class="tbtn" id="btn-set-back">← 돌아가기</button>
+  </div>
+  <div class="set-card">
+    <h2>이 앱은요</h2>
+    <p>모든 기록(사진·영상·글)은 <b>이 기기 안에만</b> 저장돼요. 인터넷으로 어디에도 전송되지 않아요. 다만 브라우저 데이터를 지우면 기록도 함께 사라지니, 소중한 달은 월말 브이로그로 저장해 두세요.</p>
+  </div>
+  <div class="set-card">
+    <h2>데이터 관리</h2>
+    <p id="set-stats"></p>
+    <button class="tbtn danger" id="btn-wipe">🗑️ 모든 기록 지우기</button>
+  </div>
+</section>
+
+<!-- 공통: 토스트 / 확인 모달 -->
+<div id="toast" role="status"></div>
+<div id="modal-back">
+  <div class="modal-box">
+    <p id="modal-text"></p>
+    <div class="modal-btns">
+      <button class="tbtn" id="modal-cancel">취소</button>
+      <button class="tbtn danger" id="modal-ok">지우기</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
