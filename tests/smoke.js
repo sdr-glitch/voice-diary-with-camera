@@ -23,8 +23,13 @@ function ok(cond, name) {
     ],
   });
   const ctx = await browser.newContext({ permissions: [] });
-  // 온보딩(주제 선택)은 대부분의 스텝에서 건너뛰도록 미리 주제 지정 ([1a]에서 별도 검증)
-  await ctx.addInitScript(() => { try { if (!localStorage.getItem('momentDiary:topic')) localStorage.setItem('momentDiary:topic', 'daily'); } catch (e) {} });
+  // 온보딩(새 일기장 만들기)은 대부분의 스텝에서 건너뛰도록 기본 일기장 하나를 미리 심어둠 ([31]에서 별도 검증)
+  await ctx.addInitScript(() => { try {
+    if (localStorage.getItem('momentDiary:diaries') === null) {
+      localStorage.setItem('momentDiary:diaries', JSON.stringify([{ id: 'd_seed', name: '일상', topic: 'daily', created: 1 }]));
+      localStorage.setItem('momentDiary:active', 'd_seed');
+    }
+  } catch (e) {} });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -32,26 +37,30 @@ function ok(cond, name) {
 
   const noEmoji = (s) => !/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u.test(s);
 
-  console.log('\n[1] 로드 & 표지 (이모티콘 없음)');
+  console.log('\n[1] 로드 & 책장 (이모티콘 없음)');
   await page.goto(URL);
   await page.evaluate(() => window.__diary.ready());
-  ok(await page.isVisible('#scr-cover'), '표지 화면 표시');
+  ok(await page.isVisible('#scr-cover'), '책장 화면 표시');
   ok(await page.$('.cover-emblem') === null, '표지 이모티콘(엠블럼) 제거됨');
   ok(await page.$('.cover-open-hint') === null, "'눌러서 펼치기' 버튼 제거됨");
+  ok(await page.$('.book-tile[data-id="d_seed"]') !== null, '책장에 기본 일기장(일상) 책 표시');
+  ok(await page.$('#shelf-add') !== null, "'새 일기장' 타일 표시");
   const coverText = await page.textContent('#scr-cover');
-  ok(noEmoji(coverText), '표지에 이모티콘 없음');
+  ok(noEmoji(coverText), '책장에 이모티콘 없음');
 
-  console.log('\n[2] 표지 클릭 → 달력(홈) 진입');
-  await page.click('#btn-open-book');
-  ok(await page.isVisible('#scr-cal'), '표지 누르면 달력 화면으로');
+  console.log('\n[2] 책 클릭 → 달력(홈) 진입');
+  await page.click('.book-tile[data-id="d_seed"]');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
+  ok(await page.isVisible('#scr-cal'), '일기장 누르면 달력 화면으로');
   ok((await page.textContent('#cal-title')).includes('년'), '달력 제목(연월) 표시');
   const calText = await page.textContent('#scr-cal .top-bar');
   ok(noEmoji(calText) && !calText.includes('표지로'), '상단에 이모티콘·표지로 없음');
 
-  console.log('\n[3] 제목 클릭 → 표지로 이동');
+  console.log('\n[3] 제목 클릭 → 책장으로 이동');
   await page.click('#cal-home-title');
-  ok(await page.isVisible('#scr-cover'), "'순간일기' 제목 누르면 표지로");
-  await page.click('#btn-open-book');
+  ok(await page.isVisible('#scr-cover'), "'순간일기' 제목 누르면 책장으로");
+  await page.click('.book-tile[data-id="d_seed"]');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
 
   console.log('\n[4] 오늘 날짜 클릭 → 오늘의 순간 담기');
   ok(await page.$('.cal-day.today') !== null, '오늘 날짜 강조 표시');
@@ -254,6 +263,10 @@ function ok(cond, name) {
   await page.click('#modal-ok');
   await page.waitForSelector('#scr-cover:not(.hidden)');
   ok((await page.evaluate(() => window.__diary.getEntries())).length === 0, '전체 삭제');
+  // 삭제 후 이어서 쓰려면 일기장이 필요 — 온보딩에서 새로 하나 만든다
+  await page.click('#onboard-topics .chip[data-k="daily"]');
+  await page.click('#onboard-start');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
 
   console.log('\n[16] 달력에서 지난 날 채우기 (아무 날짜나 클릭)');
   await page.evaluate(() => window.__diary.goCalendar('2026-05'));
@@ -338,13 +351,23 @@ function ok(cond, name) {
   ok(white, `폴라로이드 흰 프레임 여백 렌더 (rgb ${pol.frameBottom.join(',')})`);
   ok(cream, `프레임 밖은 크림색 배경 (rgb ${pol.outside.join(',')})`);
 
-  console.log('\n[21] 전체 삭제 후 기록 알림 배너');
+  console.log('\n[21] 전체 삭제 → 책장 비고 새 일기장 온보딩');
   await page.evaluate(() => window.__diary.show('scr-settings'));
   await page.click('#btn-wipe');
   await page.waitForSelector('#modal-back.on');
   await page.click('#modal-ok');
   await page.waitForSelector('#scr-cover:not(.hidden)');
   ok((await page.evaluate(() => window.__diary.getEntries())).length === 0, '전체 삭제');
+  ok((await page.evaluate(() => window.__diary.getDiaries())).length === 0, '일기장 목록도 비움');
+  ok(await page.evaluate(() => window.__diary.onboardVisible()), '일기장 없으면 새 일기장 만들기 창');
+  // 새 일기장 만들어 이어서 진행
+  await page.click('#onboard-topics .chip[data-k="daily"]');
+  await page.fill('#onboard-name', '다시 일상');
+  await page.click('#onboard-start');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
+  ok((await page.evaluate(() => window.__diary.getDiaries())).length === 1, '새 일기장 생성 후 이어서 사용');
+
+  console.log('\n[21b] 기록 알림 배너');
   await page.evaluate(() => window.__diary.reminder.show());
   ok(await page.isVisible('#reminder-banner.on'), '오늘 기록 없으면 알림 배너 표시');
   await page.click('#reminder-go');
@@ -355,8 +378,9 @@ function ok(cond, name) {
 
   console.log('\n[22] 하단 탭 이동');
   await page.evaluate(() => window.__diary.show('scr-cover'));
-  await page.click('#btn-open-book');
-  ok(await page.isVisible('#scr-cal') && await page.isVisible('#bottomnav'), '표지→달력, 하단 탭 표시');
+  await page.click('.book-tile[data-id]');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
+  ok(await page.isVisible('#scr-cal') && await page.isVisible('#bottomnav'), '책→달력, 하단 탭 표시');
   await page.click('#bottomnav .navbtn[data-scr="scr-grid"]');
   ok(await page.isVisible('#scr-grid'), '모아보기 탭');
   await page.click('#bottomnav .navbtn[data-scr="scr-stats"]');
@@ -445,11 +469,12 @@ function ok(cond, name) {
   ok(vl.length === 0, '브이로그 삭제');
 
   console.log('\n[26] 흰색 책 디자인 확인');
-  const coverBg = await page.evaluate(() => {
+  const coverBg = await page.evaluate(async () => {
     window.__diary.show('scr-cover');
-    return getComputedStyle(document.querySelector('.cover-book')).backgroundImage;
+    await window.__diary.renderShelf();
+    return getComputedStyle(document.querySelector('.book-tile:not(.add)')).backgroundImage;
   });
-  ok(coverBg.includes('rgb(255, 255, 255)'), `표지가 흰색 계열 (${coverBg.slice(0, 60)}…)`);
+  ok(coverBg.includes('rgb(255, 255, 255)'), `책이 흰색 계열 (${coverBg.slice(0, 60)}…)`);
 
   console.log('\n[27] 달력 아래 크게보기 통합 + 사진/글 인라인 수정');
   await page.evaluate(() => window.__diary.goCalendar('2026-07'));
@@ -529,34 +554,73 @@ function ok(cond, name) {
   ok(!(await page.evaluate(() => window.__diary.isFallen())), '정리하기 → 원래대로');
   ok(await page.isHidden('#grid-fallen-ctrl'), '정리 후 버튼 숨김');
 
-  console.log('\n[31] 일기장 주제 (온보딩 + 설정)');
-  // 온보딩: 주제 없을 때 오버레이 → 선택 시 저장
-  await page.evaluate(() => { localStorage.removeItem('momentDiary:topic'); window.__diary.maybeOnboard(); });
-  ok(await page.evaluate(() => window.__diary.onboardVisible()), '주제 없으면 온보딩 표시');
+  console.log('\n[31] 여러 일기장(책장) 만들기·전환·격리');
+  const workId = await page.evaluate(() => window.__diary.activeDiaryId());
+  // 책장의 '＋' → 새 일기장 만들기
+  await page.evaluate(() => window.__diary.show('scr-cover'));
+  await page.click('#shelf-add');
+  ok(await page.evaluate(() => window.__diary.onboardVisible()), "'새 일기장' → 만들기 창");
   await page.click('#onboard-topics .chip[data-k="couple"]');
+  await page.fill('#onboard-name', '우리 커플');
   await page.click('#onboard-start');
-  ok(await page.evaluate(() => window.__diary.getTopic()) === 'couple', '온보딩에서 주제 선택 저장');
-  ok(!(await page.evaluate(() => window.__diary.onboardVisible())), '선택 후 온보딩 닫힘');
-  ok((await page.textContent('.cover-sub')).includes('둘이'), '표지 문구가 주제(부부·커플)로 바뀜');
-  // 프리셋이 다양하게 늘어남 (러닝·식물집사·취미 등)
+  await page.waitForSelector('#scr-cal:not(.hidden)');
+  const coupleId = await page.evaluate(() => window.__diary.activeDiaryId());
+  ok(coupleId && coupleId !== workId, '새 일기장이 별도로 생성');
+  ok(await page.evaluate(() => window.__diary.getTopic()) === 'couple', '새 일기장 주제(부부·커플) 저장');
+  ok((await page.evaluate(() => window.__diary.getEntries())).length === 0, '새 일기장은 기록이 비어 시작(격리)');
+  // 프리셋이 다양하게 늘어남 (러닝·식물집사 등)
   ok((await page.evaluate(() => window.__diary.allTopics().map((t) => t.k))).includes('run') &&
      (await page.evaluate(() => window.__diary.allTopics().map((t) => t.k))).includes('plant'), '프리셋 주제 확장(러닝·식물집사)');
-  // 설정에서 주제 변경
+  // 새 일기장에 기록 추가 → 다른 일기장엔 안 보임(격리)
+  await page.evaluate(async () => { await window.__diary.addEntry({ text: '커플 일기장 기록' }); });
+  await page.evaluate((id) => window.__diary.openDiary(id), workId);
+  ok(!(await page.evaluate(() => window.__diary.getEntries().map((e) => e.text))).includes('커플 일기장 기록'), '일기장 간 기록이 서로 섞이지 않음');
+  await page.evaluate((id) => window.__diary.openDiary(id), coupleId);
+  ok((await page.evaluate(() => window.__diary.getEntries())).some((e) => e.text === '커플 일기장 기록'), '해당 일기장에서만 그 기록이 보임');
+  // 책장에 여러 권 + 현재 강조
+  await page.evaluate(() => window.__diary.show('scr-cover'));
+  await page.evaluate(() => window.__diary.renderShelf());
+  await page.waitForTimeout(60);
+  ok((await page.$$eval('.book-tile:not(.add)', (n) => n.length)) >= 2, '책장에 일기장 여러 권 표시');
+  ok((await page.textContent('.book-tile.cur')).includes('우리 커플'), '현재 쓰는 일기장 강조 표시');
+  // 두 번째 일기장부터는 만들기 창을 취소할 수 있음
+  await page.click('#shelf-add');
+  ok(!(await page.isHidden('#onboard-cancel')), '일기장이 있으면 취소 버튼 표시');
+  await page.click('#onboard-cancel');
+  ok(!(await page.evaluate(() => window.__diary.onboardVisible())), '취소로 만들기 창 닫힘');
+
+  console.log('\n[31b] 설정: 현재 일기장 주제 변경 + 커스텀 + 목록(이름·삭제)');
+  await page.evaluate((id) => window.__diary.openDiary(id), coupleId);
   await page.evaluate(() => window.__diary.show('scr-settings'));
   await page.click('#topic-chips .chip[data-k="pet"]');
-  ok(await page.evaluate(() => window.__diary.getTopic()) === 'pet', '설정에서 주제 변경');
-  // 사용자 커스텀 주제 만들기
+  ok(await page.evaluate(() => window.__diary.getTopic()) === 'pet', '설정에서 현재 일기장 주제 변경');
   await page.fill('#custom-topic-name', '식물집사일기');
   await page.click('#btn-add-topic');
   const customs = await page.evaluate(() => window.__diary.loadCustomTopics());
   ok(customs.length === 1 && customs[0].label === '식물집사일기', '사용자 주제 생성');
-  ok(await page.evaluate(() => window.__diary.getTopic()) === customs[0].k, '만든 주제로 바로 전환');
-  ok((await page.textContent('.cover-sub')) === '식물집사일기' || (await page.textContent('#topic-chips')).includes('식물집사일기'), '커스텀 주제 표시');
-  // 삭제
+  ok(await page.evaluate(() => window.__diary.getTopic()) === customs[0].k, '만든 주제로 현재 일기장 전환');
+  ok((await page.textContent('#topic-chips')).includes('식물집사일기'), '커스텀 주제 칩 표시');
   await page.click(`#topic-chips .chip.custom .chip-del`);
   ok((await page.evaluate(() => window.__diary.loadCustomTopics())).length === 0, '사용자 주제 삭제');
+  // 일기장 목록: 이름 바꾸기
+  ok((await page.$$eval('#diary-list .diary-item', (n) => n.length)) >= 2, '설정에 일기장 목록 표시');
+  await page.click(`#diary-list [data-rn="${coupleId}"]`);
+  await page.fill('#diary-list .diary-name-input', '커플 다이어리');
+  await page.click(`#diary-list [data-save="${coupleId}"]`);
+  ok((await page.evaluate((id) => window.__diary.getDiaries().find((d) => d.id === id).name, coupleId)) === '커플 다이어리', '설정에서 일기장 이름 변경');
+  // 일기장 삭제 (커플 일기장 삭제 → 남은 일기장으로 자동 전환)
+  const beforeDel = (await page.evaluate(() => window.__diary.getDiaries())).length;
+  await page.click(`#diary-list [data-del="${coupleId}"]`);
+  await page.waitForSelector('#modal-back.on');
+  await page.click('#modal-ok');
+  await page.waitForTimeout(80);
+  ok((await page.evaluate(() => window.__diary.getDiaries())).length === beforeDel - 1, '설정에서 일기장 삭제');
+  ok(await page.evaluate(() => window.__diary.activeDiaryId()) === workId, '삭제 후 남은 일기장으로 전환');
+  // 이후 스텝을 위해 원래 작업 일기장으로 (앞서 시드한 기록들이 있는 곳)
+  await page.evaluate((id) => window.__diary.openDiary(id), workId);
 
   console.log('\n[32] 함께 쓰기 (작성자)');
+  await page.evaluate(() => window.__diary.show('scr-settings'));
   await page.fill('#member-name', '지영');
   await page.click('#btn-add-member');
   ok((await page.evaluate(() => window.__diary.getMembers())).length === 2, '작성자 추가(나 + 지영)');
@@ -585,6 +649,11 @@ function ok(cond, name) {
   await page.click('#modal-ok');
   await page.waitForSelector('#scr-cover:not(.hidden)');
   ok((await page.evaluate(() => window.__diary.getEntries())).length === 0, '초기화(새 기기 가정)');
+  // 새 기기: 온보딩에서 일기장을 하나 만들고 그 안으로 가져오기
+  await page.click('#onboard-topics .chip[data-k="daily"]');
+  await page.fill('#onboard-name', '가져온 일기');
+  await page.click('#onboard-start');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
   const addedN = await page.evaluate((data) => window.__diary.importData(data), exported);
   ok(addedN === exported.entries.length, `가져오기로 ${addedN}개 합쳐짐`);
   ok((await page.evaluate(() => window.__diary.getMembers())).some((m) => m.name === '지영'), '가져오기로 작성자도 합쳐짐');

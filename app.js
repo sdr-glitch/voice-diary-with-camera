@@ -86,11 +86,81 @@ function applyDecoVars() {
 const DEFAULT_OUTRO = '이번 달도 수고했어';
 const APP_NAME = '순간일기';
 
-/** 날짜별 대표(썸네일) 사진 선택 — { 'YYYY-MM-DD': entryId } */
-function loadCovers() {
-  try { return JSON.parse(localStorage.getItem(LS_PREFIX + 'covers') || '{}'); } catch (e) { return {}; }
+/* ==================== 여러 일기장 (책장) ==================== */
+/* diaries: [{ id, name, topic, created }]  · active: 현재 쓰는 일기장 id
+   기록(entry)마다 diaryId 로 소속을 구분하고, 메모리 entries 는 활성 일기장만 담는다.
+   covers/members 는 일기장별로 localStorage 키를 나눈다(covers:<id> / members:<id>). */
+let obPick = '';   // 온보딩·새 일기장에서 고른 주제 key
+function loadDiaries() {
+  try { const a = JSON.parse(localStorage.getItem(LS_PREFIX + 'diaries') || '[]'); return Array.isArray(a) ? a : []; }
+  catch (e) { return []; }
 }
-function saveCovers(m) { localStorage.setItem(LS_PREFIX + 'covers', JSON.stringify(m)); }
+function saveDiaries(a) { localStorage.setItem(LS_PREFIX + 'diaries', JSON.stringify(a)); }
+function activeDiaryId() { return localStorage.getItem(LS_PREFIX + 'active') || ''; }
+function setActiveDiaryId(id) { localStorage.setItem(LS_PREFIX + 'active', id); }
+function activeDiary() { const id = activeDiaryId(); return loadDiaries().find((d) => d.id === id) || null; }
+/** 새 일기장 만들기 → id 반환 */
+function addDiary(name, topic) {
+  const info = allTopics().find((t) => t.k === topic);
+  name = (name || '').trim() || (info ? info.label : '나의 일기장');
+  const a = loadDiaries();
+  const id = 'd_' + uid();
+  a.push({ id, name: name.slice(0, 20), topic: topic || 'free', created: Date.now() });
+  saveDiaries(a);
+  return id;
+}
+function renameDiary(id, name) {
+  name = (name || '').trim(); if (!name) return;
+  const a = loadDiaries(); const d = a.find((x) => x.id === id);
+  if (d) { d.name = name.slice(0, 20); saveDiaries(a); }
+}
+/** 일기장 삭제 — 소속 기록·대표사진·멤버 전부 제거 */
+async function removeDiary(id) {
+  const all = await dbAll();
+  for (const e of all) {
+    if (e.diaryId === id) {
+      await dbDelete(e.id);
+      const u = mediaURLCache.get(e.id); if (u) { URL.revokeObjectURL(u); mediaURLCache.delete(e.id); }
+    }
+  }
+  localStorage.removeItem(LS_PREFIX + 'covers:' + id);
+  localStorage.removeItem(LS_PREFIX + 'members:' + id);
+  saveDiaries(loadDiaries().filter((d) => d.id !== id));
+}
+/** 일기장 열기 — 그 일기장의 기록만 메모리에 싣고 달력(홈)으로 */
+async function openDiary(id) {
+  setActiveDiaryId(id);
+  entries = (await dbAll()).filter((e) => e.diaryId === id);
+  sortEntries();
+  activeAuthor = '';
+  goCalendar(todayStr().slice(0, 7));
+}
+/** 기존 단일 일기장 데이터를 여러 일기장 구조로 1회 이전 */
+async function migrateToDiaries() {
+  if (localStorage.getItem(LS_PREFIX + 'diaries') !== null) return; // 이미 이전 완료(빈 배열이라도)
+  const oldTopic = localStorage.getItem(LS_PREFIX + 'topic');
+  const all = await dbAll();
+  const hasData = all.length > 0 || (oldTopic && oldTopic.length);
+  if (!hasData) { saveDiaries([]); return; } // 신규 사용자 → 책장 비움, 온보딩에서 첫 일기장 생성
+  const topic = oldTopic || 'daily';
+  const info = allTopics().find((t) => t.k === topic);
+  const id = 'd_' + uid();
+  saveDiaries([{ id, name: info ? info.label : '나의 일기장', topic, created: Date.now() }]);
+  setActiveDiaryId(id);
+  const oldCov = localStorage.getItem(LS_PREFIX + 'covers');
+  if (oldCov !== null) { localStorage.setItem(LS_PREFIX + 'covers:' + id, oldCov); localStorage.removeItem(LS_PREFIX + 'covers'); }
+  const oldMem = localStorage.getItem(LS_PREFIX + 'members');
+  if (oldMem !== null) { localStorage.setItem(LS_PREFIX + 'members:' + id, oldMem); localStorage.removeItem(LS_PREFIX + 'members'); }
+  localStorage.removeItem(LS_PREFIX + 'topic');
+  for (const e of all) { if (!e.diaryId) { e.diaryId = id; await dbPut(e); } }
+}
+
+/** 날짜별 대표(썸네일) 사진 선택 — { 'YYYY-MM-DD': entryId }, 일기장별 저장 */
+function coversKey() { return LS_PREFIX + 'covers:' + activeDiaryId(); }
+function loadCovers() {
+  try { return JSON.parse(localStorage.getItem(coversKey()) || '{}'); } catch (e) { return {}; }
+}
+function saveCovers(m) { localStorage.setItem(coversKey(), JSON.stringify(m)); }
 function setCover(date, id) { const m = loadCovers(); m[date] = id; saveCovers(m); }
 /** 그 날의 대표 이미지가 될 엔트리(선택값 우선 → 없으면 그날 첫 미디어) */
 function coverEntry(date) {
@@ -138,20 +208,21 @@ function removeCustomTopic(k) {
   saveCustomTopics(loadCustomTopics().filter((t) => t.k !== k));
   if (getTopic() === k) setTopic('');
 }
-function getTopic() { return localStorage.getItem(LS_PREFIX + 'topic') || ''; }
-function setTopic(k) { localStorage.setItem(LS_PREFIX + 'topic', k); }
+function getTopic() { const d = activeDiary(); return d ? d.topic : ''; }
+function setTopic(k) { const a = loadDiaries(); const d = a.find((x) => x.id === activeDiaryId()); if (d) { d.topic = k; saveDiaries(a); } }
 function topicInfo() { return allTopics().find((t) => t.k === getTopic()) || null; }
 
 /* 함께 쓰기 — 작성자(멤버) */
 const MEMBER_COLORS = ['#b0713f', '#57b98c', '#7a86b0', '#c25a44', '#e0a13c', '#6a8f6a'];
+function membersKey() { return LS_PREFIX + 'members:' + activeDiaryId(); }
 function loadMembers() {
   try {
-    const m = JSON.parse(localStorage.getItem(LS_PREFIX + 'members') || 'null');
+    const m = JSON.parse(localStorage.getItem(membersKey()) || 'null');
     if (Array.isArray(m) && m.length) return m;
   } catch (e) {}
   return [{ id: 'me', name: '나', color: MEMBER_COLORS[0] }];
 }
-function saveMembers(m) { localStorage.setItem(LS_PREFIX + 'members', JSON.stringify(m)); }
+function saveMembers(m) { localStorage.setItem(membersKey(), JSON.stringify(m)); }
 function memberById(id) { return loadMembers().find((m) => m.id === id) || null; }
 let activeAuthor = '';   // 기록 화면에서 선택된 작성자 id
 
@@ -445,7 +516,7 @@ function show(id) {
   if (id === 'scr-vloglib') renderVlogLib();
   if (id === 'scr-vlog') fillVlogMonths();
   if (id === 'scr-settings') renderStats();
-  if (id === 'scr-cover') renderCoverCount();
+  if (id === 'scr-cover') renderShelf();
   // 하단 탭 표시 + 활성 탭
   const nav = $('#bottomnav');
   nav.classList.toggle('hidden', !TAB_SCREENS.includes(id));
@@ -456,12 +527,27 @@ function show(id) {
 /** 하위 화면 열기 — 돌아갈 화면(backTo)을 현재 화면으로 기억 */
 function openSub(id) { backTo = curScreen; show(id); }
 
-function renderCoverCount() {
-  const t = topicInfo();
-  $('.cover-sub').textContent = t ? t.sub : '목소리와 풍경으로 쓰는 하루';
-  $('#cover-count').textContent = entries.length
-    ? `지금까지 ${entries.length}개의 순간이 담겨 있어요`
-    : '첫 순간을 기다리고 있어요';
+/** 책장(표지 화면) — 일기장들을 책으로 나열 + 새 일기장 타일 */
+async function renderShelf() {
+  const shelf = $('#shelf');
+  if (!shelf) return;
+  const diaries = loadDiaries();
+  const active = activeDiaryId();
+  const counts = {};
+  try { (await dbAll()).forEach((e) => { if (e.diaryId) counts[e.diaryId] = (counts[e.diaryId] || 0) + 1; }); } catch (e) {}
+  const books = diaries.map((d, i) => {
+    const info = allTopics().find((t) => t.k === d.topic);
+    const sub = info ? info.sub : '';
+    const n = counts[d.id] || 0;
+    return `<button class="book-tile spine-${i % 5} ${d.id === active ? 'cur' : ''}" data-id="${d.id}">
+      <span class="book-band" aria-hidden="true"></span>
+      <span class="book-name">${escapeHTML(d.name)}</span>
+      <span class="book-topic">${escapeHTML(sub)}</span>
+      <span class="book-count">${n ? n + '개의 순간' : '첫 순간을 기다려요'}</span>
+    </button>`;
+  }).join('');
+  shelf.innerHTML = books +
+    `<button class="book-tile add" id="shelf-add"><span class="book-plus" aria-hidden="true">＋</span><span class="book-name">새 일기장</span></button>`;
 }
 
 /* ==================== 책 렌더링 · 페이지 넘김 ==================== */
@@ -799,36 +885,39 @@ function applyFitPreview() {
   const img = $('#cap-preview-img');
   img.style.transform = `translate(${fitState.x}%, ${fitState.y}%) scale(${fitState.scale})`;
 }
-/** 사진 미리보기 핀치 줌 + 한 손가락 이동 */
+/** 사진 미리보기 핀치 줌 + 한 손가락 이동 (부드럽게: rect 캐시 + rAF) */
 function bindPhotoPinch() {
   const stage = document.querySelector('.cam-stage');
   const pts = new Map();
   let startDist = 0, startScale = 1, startX = 0, startY = 0, startMid = null;
+  let rect = null, raf = 0, pending = false;
   const editingPhoto = () => captured && captured.kind === 'photo' && !$('#cap-preview-img').classList.contains('hidden');
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const flush = () => { raf = 0; if (pending) { applyFitPreview(); pending = false; } };
   stage.addEventListener('pointerdown', (e) => {
     if (!editingPhoto()) return;
     if (e.target.closest('.stk')) return;  // 스티커 드래그는 스티커가 처리
+    rect = stage.getBoundingClientRect();   // 이동 중엔 다시 측정하지 않음(리플로우 방지)
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.size === 1) { startX = fitState.x; startY = fitState.y; startMid = { x: e.clientX, y: e.clientY }; }
     if (pts.size === 2) { const a = [...pts.values()]; startDist = dist(a[0], a[1]) || 1; startScale = fitState.scale; }
     try { stage.setPointerCapture(e.pointerId); } catch (er) {}
   });
   stage.addEventListener('pointermove', (e) => {
-    if (!editingPhoto() || !pts.has(e.pointerId)) return;
+    if (!editingPhoto() || !pts.has(e.pointerId) || !rect) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    const r = stage.getBoundingClientRect();
     if (pts.size >= 2) {
       const a = [...pts.values()];
       fitState.scale = Math.min(4, Math.max(0.3, startScale * (dist(a[0], a[1]) / startDist)));
     } else if (startMid) {
-      fitState.x = startX + (e.clientX - startMid.x) / r.width * 100;
-      fitState.y = startY + (e.clientY - startMid.y) / r.height * 100;
+      fitState.x = startX + (e.clientX - startMid.x) / rect.width * 100;
+      fitState.y = startY + (e.clientY - startMid.y) / rect.height * 100;
     }
-    applyFitPreview();
+    pending = true;
+    if (!raf) raf = requestAnimationFrame(flush);   // 프레임당 한 번만 적용
     e.preventDefault();
   }, { passive: false });
-  const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) startMid = null; };
+  const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) startMid = null; if (!pts.size) rect = null; };
   stage.addEventListener('pointerup', up);
   stage.addEventListener('pointercancel', up);
 }
@@ -1191,6 +1280,7 @@ async function saveEntry() {
   }
   const entry = {
     id: uid(),
+    diaryId: activeDiaryId(),
     date: captureDate || todayStr(),
     ts: Date.now(),
     kind: media ? media.kind : 'none',
@@ -1221,7 +1311,7 @@ async function removeEntry(id) {
   const url = mediaURLCache.get(id);
   if (url) { URL.revokeObjectURL(url); mediaURLCache.delete(id); }
   entries = entries.filter((e) => e.id !== id);
-  renderCoverCount();
+  renderShelf();
   if (curScreen === 'scr-cal') renderCal();
   else if (curScreen === 'scr-grid') renderGrid();
 }
@@ -2008,9 +2098,24 @@ function renderStats() {
   const clips = entries.filter((e) => e.kind === 'video').length;
   $('#set-stats').textContent =
     `지금까지 순간 ${entries.length}개 (사진 ${photos} · 영상 ${clips} · 글 ${entries.length - photos - clips})`;
+  renderDiaryList();
   renderTopicChips();
   renderMembers();
   renderDecoChips();
+}
+/** 설정: 일기장 목록 (현재 쓰는 일기장 표시 + 이름/삭제) */
+function renderDiaryList() {
+  const wrap = $('#diary-list'); if (!wrap) return;
+  const active = activeDiaryId();
+  const many = loadDiaries().length > 1;
+  wrap.innerHTML = loadDiaries().map((d) => {
+    const info = allTopics().find((t) => t.k === d.topic);
+    return `<div class="diary-item ${d.id === active ? 'cur' : ''}">
+      <button class="diary-open" data-open="${d.id}"><b>${escapeHTML(d.name)}</b><span>${escapeHTML(info ? info.label : '')}${d.id === active ? ' · 쓰는 중' : ''}</span></button>
+      <button class="tbtn diary-rename" data-rn="${d.id}">이름</button>
+      ${many ? `<button class="tbtn danger" data-del="${d.id}">삭제</button>` : ''}
+    </div>`;
+  }).join('') || '<p class="empty-note sm">아직 일기장이 없어요. 아래에서 새로 만들어 보세요.</p>';
 }
 async function wipeAll() {
   const ok = await confirmModal('정말 모든 기록을 지울까요? 사진·영상·글이 전부 사라지고 되돌릴 수 없어요.');
@@ -2027,16 +2132,26 @@ async function wipeAll() {
   vlogs = [];
 
   await initDB();
+  saveDiaries([]);            // 일기장 목록도 초기화
+  setActiveDiaryId('');
   toast('모든 기록을 지웠어요. 새 마음으로 시작해요.');
   show('scr-cover');
+  maybeOnboard();            // 첫 일기장부터 다시
 }
 
-/* ==================== 주제 / 온보딩 ==================== */
-function maybeOnboard() {
-  if (getTopic()) { $('#onboard').classList.remove('on'); return; }
+/* ==================== 주제 / 온보딩 (새 일기장 만들기) ==================== */
+/** 새 일기장 만들기 창 열기 — 첫 실행 + 책장의 '＋'에서 공용 */
+function openNewDiary() {
+  obPick = '';
   $('#onboard-topics').innerHTML = allTopics().map((t) => `<button class="chip" data-k="${t.k}">${escapeHTML(t.label)}</button>`).join('');
+  const nameInput = $('#onboard-name'); if (nameInput) nameInput.value = '';
   $('#onboard-start').disabled = true;
+  $('#onboard-cancel').classList.toggle('hidden', !loadDiaries().length); // 첫 일기장은 취소 불가
   $('#onboard').classList.add('on');
+}
+function maybeOnboard() {
+  if (loadDiaries().length) { $('#onboard').classList.remove('on'); return; }
+  openNewDiary();
 }
 function renderTopicChips() {
   const cur = getTopic();
@@ -2115,7 +2230,7 @@ async function importDiary(file) {
       if (existing.has(e.id)) continue;
       const media = e.media;
       const blob = media ? await (await fetch(media)).blob() : null;
-      const entry = { ...e, blob }; delete entry.media;
+      const entry = { ...e, blob, diaryId: activeDiaryId() }; delete entry.media;
       await dbPut(entry); entries.push(entry); existing.add(e.id); added++;
     }
     // 멤버 합치기
@@ -2131,7 +2246,7 @@ async function importDiary(file) {
     Object.entries(data.covers || {}).forEach(([d, id]) => { if (!cov[d]) cov[d] = id; });
     saveCovers(cov);
     sortEntries();
-    renderCoverCount();
+    renderShelf();
     toast(added ? `${added}개의 일기를 가져와 합쳤어요.` : '새로 합칠 일기가 없었어요(이미 있는 기록).');
     return added;
   } catch (err) {
@@ -2180,8 +2295,12 @@ async function toggleReminder(on) {
 
 /* ==================== 이벤트 바인딩 ==================== */
 function bind() {
-  // 표지 → 달력(홈), 제목 클릭 → 표지
-  $('#btn-open-book').onclick = () => goCalendar(todayStr().slice(0, 7));
+  // 책장(표지): 일기장 열기 / 새 일기장. 제목 클릭 → 책장으로
+  $('#shelf').addEventListener('click', (e) => {
+    if (e.target.closest('#shelf-add')) { openNewDiary(); return; }
+    const tile = e.target.closest('.book-tile');
+    if (tile && tile.dataset.id) openDiary(tile.dataset.id);
+  });
   $('#cal-home-title').onclick = () => show('scr-cover');
 
   // 하단 탭 (모아보기 탭은 기분 필터 해제하고 전체)
@@ -2297,8 +2416,7 @@ function bind() {
     $$('#author-chips .author-chip').forEach((x) => x.classList.toggle('on', x === b));
   });
 
-  // 온보딩 (주제 선택)
-  let obPick = '';
+  // 온보딩 / 새 일기장 만들기 (주제 선택 → 이름 → 만들기)
   $('#onboard-topics').addEventListener('click', (e) => {
     const b = e.target.closest('.chip');
     if (!b) return;
@@ -2308,18 +2426,22 @@ function bind() {
   });
   $('#onboard-start').onclick = () => {
     if (!obPick) return;
-    setTopic(obPick);
+    const name = ($('#onboard-name') ? $('#onboard-name').value : '').trim();
+    const id = addDiary(name, obPick);
     $('#onboard').classList.remove('on');
-    renderCoverCount();
+    openDiary(id);
+    toast('새 일기장을 만들었어요.');
   };
-  // 온보딩: 직접 주제 만들기 → 만들고 바로 시작
+  $('#onboard-cancel').onclick = () => { $('#onboard').classList.remove('on'); };
+  // 온보딩: 직접 주제 만들기 → 그 주제를 선택 상태로
   const onboardCreate = () => {
     const name = $('#onboard-custom-name').value.trim();
     if (!name) { toast('주제 이름을 입력해 주세요.'); return; }
-    setTopic(addCustomTopic(name));
+    obPick = addCustomTopic(name);
     $('#onboard-custom-name').value = '';
-    $('#onboard').classList.remove('on');
-    renderCoverCount();
+    $('#onboard-topics').innerHTML = allTopics().map((t) =>
+      `<button class="chip ${t.k === obPick ? 'on' : ''}" data-k="${t.k}">${escapeHTML(t.label)}</button>`).join('');
+    $('#onboard-start').disabled = false;
   };
   $('#onboard-custom-add').onclick = onboardCreate;
   $('#onboard-custom-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') onboardCreate(); });
@@ -2327,12 +2449,12 @@ function bind() {
   // 설정: 주제 변경 / 사용자 주제 삭제
   $('#topic-chips').addEventListener('click', (e) => {
     const del = e.target.closest('.chip-del');
-    if (del) { e.stopPropagation(); removeCustomTopic(del.dataset.del); renderTopicChips(); renderCoverCount(); return; }
+    if (del) { e.stopPropagation(); removeCustomTopic(del.dataset.del); renderTopicChips(); renderShelf(); return; }
     const b = e.target.closest('.chip');
     if (!b) return;
     setTopic(b.dataset.k);
     renderTopicChips();
-    renderCoverCount();
+    renderShelf();
     toast('일기장 주제를 바꿨어요.');
   });
   const addTopicUI = () => {
@@ -2341,11 +2463,53 @@ function bind() {
     setTopic(addCustomTopic(name));
     $('#custom-topic-name').value = '';
     renderTopicChips();
-    renderCoverCount();
+    renderShelf();
     toast(`'${name}' 주제를 만들었어요.`);
   };
   $('#btn-add-topic').onclick = addTopicUI;
   $('#custom-topic-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') addTopicUI(); });
+
+  // 설정: 일기장 관리 (열기 / 이름 바꾸기 / 삭제 / 새로 만들기)
+  $('#btn-new-diary').onclick = () => openNewDiary();
+  $('#diary-list').addEventListener('click', async (e) => {
+    const open = e.target.closest('[data-open]');
+    const rn = e.target.closest('[data-rn]');
+    const save = e.target.closest('[data-save]');
+    const del = e.target.closest('[data-del]');
+    if (open) { openDiary(open.dataset.open); return; }
+    if (rn) {
+      const item = rn.closest('.diary-item');
+      const d = loadDiaries().find((x) => x.id === rn.dataset.rn);
+      if (!d || !item) return;
+      item.innerHTML = `<input type="text" class="diary-name-input" maxlength="20" value="${escapeHTML(d.name)}">
+        <button class="tbtn primary diary-save" data-save="${d.id}">저장</button>`;
+      const inp = item.querySelector('.diary-name-input'); if (inp) { inp.focus(); inp.select(); }
+      return;
+    }
+    if (save) {
+      const inp = save.closest('.diary-item').querySelector('.diary-name-input');
+      renameDiary(save.dataset.save, inp ? inp.value : '');
+      renderDiaryList();
+      return;
+    }
+    if (del) {
+      const d = loadDiaries().find((x) => x.id === del.dataset.del);
+      const ok = await confirmModal(`'${d ? d.name : ''}' 일기장을 지울까요? 이 일기장의 사진·영상·글이 모두 사라져요.`);
+      if (!ok) return;
+      const wasActive = activeDiaryId() === del.dataset.del;
+      await removeDiary(del.dataset.del);
+      if (wasActive) {
+        const first = loadDiaries()[0];
+        if (first) { setActiveDiaryId(first.id); entries = (await dbAll()).filter((x) => x.diaryId === first.id); sortEntries(); }
+        else { setActiveDiaryId(''); entries = []; }
+      }
+      renderStats();
+      toast('일기장을 지웠어요.');
+    }
+  });
+  $('#diary-list').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { const save = e.target.closest('.diary-name-input'); if (save) { const btn = e.target.closest('.diary-item').querySelector('.diary-save'); if (btn) btn.click(); } }
+  });
 
   // 설정: 사진 꾸미기 (프레임/테이프 색)
   $('#frame-chips').addEventListener('click', (e) => {
@@ -2493,12 +2657,15 @@ function bind() {
 async function init() {
   bind();
   await initDB();
-  entries = await dbAll();
+  await migrateToDiaries();
+  const active = activeDiaryId();
+  entries = active ? (await dbAll()).filter((e) => e.diaryId === active) : [];
   sortEntries();
   await loadVlogs();
   applyDecoVars();
-  renderCoverCount();
-  maybeOnboard();
+  show('scr-cover');   // 책장부터
+  await renderShelf(); // 책장 렌더 완료 보장 (dbAll 비동기)
+  maybeOnboard();      // 일기장이 하나도 없으면 첫 일기장 만들기 창
   scheduleReminder();
   // 오프라인 캐시 — https에서만 (file://은 서비스 워커 미지원이라 스킵)
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
@@ -2534,16 +2701,26 @@ window.__diary = {
       thumb = dataURL;
       if (kind === 'none') kind = 'photo';
     }
-    const entry = { id: uid(), date: date || todayStr(), ts: Date.now(), kind, blob, thumb, filter, durMs, weather, mood, author, stickers, text };
+    const entry = { id: uid(), diaryId: activeDiaryId(), date: date || todayStr(), ts: Date.now(), kind, blob, thumb, filter, durMs, weather, mood, author, stickers, text };
     await dbPut(entry);
     entries.push(entry);
     sortEntries();
     return entry.id;
   },
+  // 여러 일기장(책장) 훅
+  getDiaries: loadDiaries, activeDiaryId, addDiary, renameDiary, removeDiary,
+  openDiary, renderShelf,
+  ensureDiary: async (topic = 'daily', name = '') => {
+    if (activeDiaryId() && loadDiaries().some((d) => d.id === activeDiaryId())) return activeDiaryId();
+    if (localStorage.getItem(LS_PREFIX + 'diaries') === null) saveDiaries([]);
+    const id = addDiary(name, topic);
+    await openDiary(id);
+    return id;
+  },
   // 주제·멤버·교환 훅
-  getTopic, setTopic: (k) => { setTopic(k); renderCoverCount(); },
+  getTopic, setTopic: (k) => { setTopic(k); renderShelf(); },
   allTopics, addCustomTopic, loadCustomTopics,
-  maybeOnboard, onboardVisible: () => $('#onboard').classList.contains('on'),
+  maybeOnboard, openNewDiary, onboardVisible: () => $('#onboard').classList.contains('on'),
   getMembers: loadMembers, addMember, setActiveAuthor: (id) => { activeAuthor = id; },
   exportData: async () => {
     const outEntries = await Promise.all(entries.map(async (e) => { const { blob, ...r } = e; return { ...r, media: blob ? await blobToDataURL(blob) : null }; }));
