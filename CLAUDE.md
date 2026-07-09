@@ -41,7 +41,11 @@
 - IndexedDB `moment-diary` / store `entries` — `{ id, date(YYYY-MM-DD), ts, kind: photo|video|none, blob, thumb, filter, durMs, weather, mood, stickers:[{e,x,y,s}], text }`
   (스티커는 미디어에 굽지 않고 메타데이터로 저장 → 페이지에선 오버레이, 브이로그에선 캔버스에 그림)
 - 영상은 **길이 제한 없음**: 셔터로 녹화 시작/정지 토글(`startVideoRec`/`stopVideoRec`), `durMs` 저장. 녹화 중에도 캔버스가 갱신돼야 captureStream에 담김(`!(captured&&captured.blob)`일 때 draw).
-- localStorage(`momentDiary:`): sound(on/off)·volume(0~100)·remindOn·remindTime·outro.
+- localStorage(`momentDiary:`): sound·volume·remindOn·remindTime·outro·topic·customTopics·members·covers.
+- **주제**: `TOPICS`(프리셋) + `loadCustomTopics()`(사용자 직접), `allTopics()`. 첫 실행 `maybeOnboard()`(주제 없으면 오버레이 `#onboard`), 설정에서 변경·직접 만들기(`addCustomTopic`)·삭제. `topicInfo().sub`가 표지 문구.
+- **함께 쓰기**: `loadMembers()`(기본 [나]), 설정에서 추가/삭제. 기록 시 멤버 2명+면 `#author-row`로 작성자 선택(`activeAuthor`), `entry.author` 저장, 페이지·목록·그리드에 표시(`authorTag`, 색 점).
+- **교환일기(서버 없음)**: `exportDiary`(미디어 base64 dataURL 포함 JSON 내보내기) / `importDiary`(id 기준 중복 제외 병합, 멤버·주제·대표사진도 합침). 실시간 동기화는 백엔드 도입 시 추가.
+- **영상 중심**: `camMode` 기본 `'video'`. 촬영 UI는 영상 우선 + 아래 짧은 메모.
 - **필터 8종**: none·vintage·colorpop·fisheye·film·retro(폴더폰: 저해상도 픽셀화+초록 LCD+스캔라인)·mono·dreamy. `CSS_FILTER`(ctx.filter)+수동 오버레이, retro는 축소→확대 픽셀화.
 - **날짜 채우기**: `captureDate`가 기록 대상 날짜. `openCaptureFor(date)`로 달력의 지난 날/오늘 진입. 갤러리 가져오기 `importFromGallery(file)`(사진은 필터 적용, 영상은 원본+메타 durMs).
 - **브이로그 폴라로이드**: `polaroidGeom/drawPolaroidFrame/drawMediaCover(zoom)/polaroidStickers/polaroidCaption`. 사진은 켄번즈(zoom 1→1.09), 영상은 그대로. 아웃트로는 `opts.outro`(수정·저장, 기본 `DEFAULT_OUTRO`) + `APP_NAME` 고정 소자막. **브이로그는 사진·영상만**(글만 있는 날 제외 — `buildClipList`/`buildVlog`에서 필터).

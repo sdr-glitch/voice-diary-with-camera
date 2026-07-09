@@ -23,6 +23,8 @@ function ok(cond, name) {
     ],
   });
   const ctx = await browser.newContext({ permissions: [] });
+  // 온보딩(주제 선택)은 대부분의 스텝에서 건너뛰도록 미리 주제 지정 ([1a]에서 별도 검증)
+  await ctx.addInitScript(() => { try { if (!localStorage.getItem('momentDiary:topic')) localStorage.setItem('momentDiary:topic', 'daily'); } catch (e) {} });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -82,9 +84,11 @@ function ok(cond, name) {
   ok(await page.isVisible('#scr-capture'), '빈 페이지 누르면 기록 화면으로');
   await page.click('#btn-cap-back');
 
-  console.log('\n[7] 사진 촬영 + 기분/날씨 + 저장');
+  console.log('\n[7] 사진 촬영 + 기분/날씨 + 저장 (기본은 영상 → 사진으로 전환)');
   await page.evaluate(() => window.__diary.show('scr-capture'));
   await page.waitForFunction(() => window.__diary.camState().hasStream, null, { timeout: 8000 });
+  ok(await page.evaluate(() => window.__diary.camState().mode) === 'video', '기본 촬영 모드가 영상');
+  await page.click('#mode-toggle button[data-mode="photo"]');
   await page.click('#filter-row .chip[data-filter="vintage"]');
   await page.click('#btn-shutter');
   await page.waitForFunction(() => window.__diary.camState().captured === 'photo', null, { timeout: 5000 });
@@ -507,7 +511,70 @@ function ok(cond, name) {
   ok(!(await page.evaluate(() => window.__diary.isFallen())), '정리하기 → 원래대로');
   ok(await page.isHidden('#grid-fallen-ctrl'), '정리 후 버튼 숨김');
 
-  console.log('\n[31] PWA 구성');
+  console.log('\n[31] 일기장 주제 (온보딩 + 설정)');
+  // 온보딩: 주제 없을 때 오버레이 → 선택 시 저장
+  await page.evaluate(() => { localStorage.removeItem('momentDiary:topic'); window.__diary.maybeOnboard(); });
+  ok(await page.evaluate(() => window.__diary.onboardVisible()), '주제 없으면 온보딩 표시');
+  await page.click('#onboard-topics .chip[data-k="couple"]');
+  await page.click('#onboard-start');
+  ok(await page.evaluate(() => window.__diary.getTopic()) === 'couple', '온보딩에서 주제 선택 저장');
+  ok(!(await page.evaluate(() => window.__diary.onboardVisible())), '선택 후 온보딩 닫힘');
+  ok((await page.textContent('.cover-sub')).includes('둘이'), '표지 문구가 주제(부부·커플)로 바뀜');
+  // 프리셋이 다양하게 늘어남 (러닝·식물집사·취미 등)
+  ok((await page.evaluate(() => window.__diary.allTopics().map((t) => t.k))).includes('run') &&
+     (await page.evaluate(() => window.__diary.allTopics().map((t) => t.k))).includes('plant'), '프리셋 주제 확장(러닝·식물집사)');
+  // 설정에서 주제 변경
+  await page.evaluate(() => window.__diary.show('scr-settings'));
+  await page.click('#topic-chips .chip[data-k="pet"]');
+  ok(await page.evaluate(() => window.__diary.getTopic()) === 'pet', '설정에서 주제 변경');
+  // 사용자 커스텀 주제 만들기
+  await page.fill('#custom-topic-name', '식물집사일기');
+  await page.click('#btn-add-topic');
+  const customs = await page.evaluate(() => window.__diary.loadCustomTopics());
+  ok(customs.length === 1 && customs[0].label === '식물집사일기', '사용자 주제 생성');
+  ok(await page.evaluate(() => window.__diary.getTopic()) === customs[0].k, '만든 주제로 바로 전환');
+  ok((await page.textContent('.cover-sub')) === '식물집사일기' || (await page.textContent('#topic-chips')).includes('식물집사일기'), '커스텀 주제 표시');
+  // 삭제
+  await page.click(`#topic-chips .chip.custom .chip-del`);
+  ok((await page.evaluate(() => window.__diary.loadCustomTopics())).length === 0, '사용자 주제 삭제');
+
+  console.log('\n[32] 함께 쓰기 (작성자)');
+  await page.fill('#member-name', '지영');
+  await page.click('#btn-add-member');
+  ok((await page.evaluate(() => window.__diary.getMembers())).length === 2, '작성자 추가(나 + 지영)');
+  ok((await page.$$eval('#member-list .member-item', (n) => n.length)) === 2, '멤버 목록 2명 표시');
+  // 기록 화면에 작성자 선택 표시 + 저장
+  await page.evaluate(() => window.__diary.openCaptureFor('2026-07-16'));
+  await page.waitForSelector('#scr-capture:not(.hidden)');
+  ok(await page.isVisible('#author-row'), '멤버 2명이면 작성자 선택칸 표시');
+  const jiId = (await page.evaluate(() => window.__diary.getMembers())).find((m) => m.name === '지영').id;
+  await page.evaluate((id) => window.__diary.setActiveAuthor(id), jiId);
+  await page.fill('#diary-text', '지영이가 쓴 기록');
+  await page.click('#btn-save-entry');
+  await page.waitForSelector('#scr-book:not(.hidden)');
+  const je = (await page.evaluate(() => window.__diary.getEntries())).find((e) => e.text === '지영이가 쓴 기록');
+  ok(je && je.author === jiId, '기록에 작성자 저장');
+  ok((await page.textContent('#page-right')).includes('지영'), '크게 보기에 작성자 표시');
+
+  console.log('\n[33] 교환일기 (내보내기 → 새 기기처럼 가져와 합치기)');
+  const exported = await page.evaluate(() => window.__diary.exportData());
+  ok(exported.app === 'moment-diary' && exported.entries.length > 0 && exported.members.length === 2, `내보내기 데이터(일기 ${exported.entries.length}, 멤버 ${exported.members.length})`);
+  ok(exported.entries.some((e) => e.media && e.media.startsWith('data:')), '미디어가 파일에 포함(base64)');
+  // 전부 지운 뒤(=새 기기) 가져와 합치기
+  await page.evaluate(() => window.__diary.show('scr-settings'));
+  await page.click('#btn-wipe');
+  await page.waitForSelector('#modal-back.on');
+  await page.click('#modal-ok');
+  await page.waitForSelector('#scr-cover:not(.hidden)');
+  ok((await page.evaluate(() => window.__diary.getEntries())).length === 0, '초기화(새 기기 가정)');
+  const addedN = await page.evaluate((data) => window.__diary.importData(data), exported);
+  ok(addedN === exported.entries.length, `가져오기로 ${addedN}개 합쳐짐`);
+  ok((await page.evaluate(() => window.__diary.getMembers())).some((m) => m.name === '지영'), '가져오기로 작성자도 합쳐짐');
+  // 다시 가져오면 중복 없음
+  const addedN2 = await page.evaluate((data) => window.__diary.importData(data), exported);
+  ok(addedN2 === 0, '같은 파일 다시 가져와도 중복 안 생김');
+
+  console.log('\n[34] PWA 구성');
   const root = path.resolve(__dirname, '..');
   const mf = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   ok(mf.name && mf.icons.length >= 2 && mf.display === 'standalone', 'manifest 필수 필드');

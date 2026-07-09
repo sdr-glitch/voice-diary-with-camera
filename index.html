@@ -129,8 +129,8 @@
 
     <div class="cap-controls">
       <div class="mode-toggle" id="mode-toggle">
-        <button data-mode="photo" class="on">사진</button>
-        <button data-mode="video">영상</button>
+        <button data-mode="video" class="on">영상</button>
+        <button data-mode="photo">사진</button>
       </div>
       <button id="btn-shutter" aria-label="촬영"><span class="shutter-ring"></span></button>
       <button id="btn-retake" class="tbtn hidden">다시 찍기</button>
@@ -158,10 +158,17 @@
       </div>
     </div>
 
+    <!-- 작성자 (함께 쓰기 · 멤버 2명 이상일 때 표시) -->
+    <div class="pick-row hidden" id="author-row">
+      <span class="lbl">누가 쓰나요?</span>
+      <div class="chip-row" id="author-chips"></div>
+    </div>
+
+    <!-- 아래 메모 (영상/사진이 주, 메모는 짧게) -->
     <div class="voice-row">
       <button id="btn-mic" aria-label="음성으로 말하기">음성</button>
       <div class="voice-col">
-        <textarea id="diary-text" placeholder="'음성' 버튼을 누르고 지금의 느낌을 말해보세요. 말한 내용이 여기에 글로 적혀요. 직접 입력해도 좋아요."></textarea>
+        <textarea id="diary-text" placeholder="아래에 짧은 메모를 남겨보세요. '음성' 버튼을 누르면 말한 내용이 글로 적혀요."></textarea>
         <span id="voice-status"></span>
       </div>
     </div>
@@ -262,8 +269,35 @@
 <section id="scr-settings" class="screen hidden tabscr">
   <header class="top-bar"><h1 class="app-title">설정</h1></header>
   <div class="set-card">
+    <h2>일기장 주제</h2>
+    <p>이 일기장의 주제를 골라요. 표지 문구가 주제에 맞게 바뀌어요. 직접 만들 수도 있어요.</p>
+    <div class="chip-row" id="topic-chips"></div>
+    <div class="set-row">
+      <input type="text" id="custom-topic-name" maxlength="16" placeholder="직접 만들기 (예: 취미로그, 식물집사)">
+      <button class="tbtn" id="btn-add-topic">만들기</button>
+    </div>
+  </div>
+  <div class="set-card">
+    <h2>함께 쓰기 (작성자)</h2>
+    <p>가족·연인과 한 일기장을 함께 써요. 사람을 추가하면 기록할 때 누가 썼는지 고를 수 있어요.</p>
+    <div id="member-list"></div>
+    <div class="set-row">
+      <input type="text" id="member-name" maxlength="12" placeholder="이름 (예: 엄마, 지영)">
+      <button class="tbtn" id="btn-add-member">추가</button>
+    </div>
+  </div>
+  <div class="set-card">
+    <h2>교환일기 (내보내기 · 가져오기)</h2>
+    <p>멀리 있는 사람과 주고받고 싶다면, 내 일기를 파일로 <b>내보내</b> 전달하고, 받은 파일을 <b>가져오기</b>로 합쳐요. (실시간 자동 공유는 준비 중이에요.)</p>
+    <div class="set-row">
+      <button class="tbtn" id="btn-export">파일로 내보내기</button>
+      <button class="tbtn" id="btn-import">가져와서 합치기</button>
+      <input type="file" id="import-input" accept="application/json,.json" class="hidden">
+    </div>
+  </div>
+  <div class="set-card">
     <h2>이 앱은요</h2>
-    <p>모든 기록(사진·영상·글)은 <b>이 기기 안에만</b> 저장돼요. 인터넷으로 어디에도 전송되지 않아요. 다만 브라우저 데이터를 지우면 기록도 함께 사라지니, 소중한 달은 브이로그로 저장해 두세요.</p>
+    <p>모든 기록(사진·영상·글)은 <b>이 기기 안에만</b> 저장돼요. 인터넷으로 어디에도 전송되지 않아요. 다만 브라우저 데이터를 지우면 기록도 함께 사라지니, 소중한 달은 브이로그나 내보내기로 저장해 두세요.</p>
   </div>
   <div class="set-card">
     <h2>알림</h2>
@@ -314,6 +348,20 @@
     <span>설정</span>
   </button>
 </nav>
+
+<!-- 첫 실행 온보딩 — 주제 선택 -->
+<div id="onboard">
+  <div class="onboard-box">
+    <div class="onboard-title">어떤 순간을 담을까요?</div>
+    <p class="onboard-sub">일기장의 주제를 골라주세요. 나중에 설정에서 바꿀 수 있어요.</p>
+    <div class="chip-row" id="onboard-topics"></div>
+    <div class="set-row">
+      <input type="text" id="onboard-custom-name" maxlength="16" placeholder="직접 만들기 (예: 러닝기록, 식물집사)">
+      <button class="tbtn" id="onboard-custom-add">만들기</button>
+    </div>
+    <button class="tbtn primary" id="onboard-start" disabled>이 주제로 시작하기</button>
+  </div>
+</div>
 
 <!-- 오늘의 순간 담기 (플로팅) — 달력·모아보기·책에서 표시 -->
 <button id="fab" class="fab hidden" aria-label="오늘의 순간 담기">＋</button>

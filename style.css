@@ -890,6 +890,59 @@ button.cal-day.sel.thumb { box-shadow: 0 0 0 2.5px var(--accent); }
 .mood-card.kind-응원 { background: #fbf1e8; border-color: #f0dcc6; }
 .mood-card.kind-응원 .mood-card-tag { background: var(--accent); }
 
+/* 온보딩 (주제 선택) */
+#onboard {
+  position: fixed; inset: 0; z-index: 100; display: none;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(40,32,22,.45); backdrop-filter: blur(4px);
+}
+#onboard.on { display: flex; }
+.onboard-box {
+  width: min(400px, 94vw); background: var(--paper); border-radius: 20px;
+  box-shadow: var(--shadow); padding: 24px; display: flex; flex-direction: column; gap: 12px;
+}
+.onboard-title { font-family: var(--serif); font-size: 22px; font-weight: 600; }
+.onboard-sub { font-size: 13px; color: var(--ink-soft); line-height: 1.7; }
+#onboard-topics { margin: 4px 0 6px; }
+#onboard-start { margin-top: 4px; padding: 13px; font-size: 15px; }
+#onboard-start:disabled { opacity: .5; }
+
+/* 사용자 주제 칩 삭제 표시 */
+.chip.custom { padding-right: 26px; position: relative; }
+.chip-del {
+  position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+  width: 15px; height: 15px; border-radius: 50%; font-style: normal; font-size: 9px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(40,34,26,.12); color: var(--ink-soft);
+}
+.chip.on .chip-del { background: rgba(255,255,255,.3); color: #fff; }
+
+/* 작성자 칩 (색 점) */
+.author-chip { position: relative; padding-left: 26px; }
+.author-chip::before {
+  content: ""; position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  width: 10px; height: 10px; border-radius: 50%; background: var(--mc, var(--accent));
+}
+.author-chip.on { background: var(--mc, var(--accent)); color: #fff; border-color: var(--mc, var(--accent)); }
+.author-chip.on::before { background: #fff; }
+
+/* 멤버 목록(설정) */
+.member-item { display: flex; align-items: center; gap: 10px; padding: 6px 2px; }
+.member-item b { font-size: 14px; }
+.member-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.member-me { font-size: 11px; color: var(--ink-dim); }
+.member-del { margin-left: auto; padding: 5px 12px; font-size: 12px; }
+.set-row input[type="text"] {
+  flex: 1; min-width: 120px; border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 11px; font-size: 14px; background: #fffdf7; color: var(--ink);
+}
+
+/* 그리드 작성자 점 */
+.grid-author {
+  position: absolute; right: 6px; bottom: 6px; width: 12px; height: 12px;
+  border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+
 /* 모아보기 기분 필터 바 */
 .grid-filter {
   width: min(560px, 96vw); display: flex; align-items: center; gap: 10px;

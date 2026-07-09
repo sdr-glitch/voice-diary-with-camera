@@ -29,7 +29,7 @@ let backTo = 'scr-cal';           // 하위 화면(기록·브이로그·설정)
 let camStream = null;
 let camLoopId = 0;
 let camFilter = 'vintage';
-let camMode = 'photo';            // photo | video
+let camMode = 'video';            // 영상 중심 — 기본 영상 (photo | video)
 let captured = null;              // { kind, blob, thumb, filter, durMs }
 let recording = false;
 let vidRec = null;                // 진행 중인 MediaRecorder (영상 토글 녹화)
@@ -73,6 +73,58 @@ function coverEntry(date) {
 function isCover(e) {
   return coverEntry(e.date) && coverEntry(e.date).id === e.id;
 }
+
+/* 일기장 주제 (프리셋 + 사용자 커스텀) */
+const TOPICS = [
+  { k: 'daily', label: '일상', sub: '매일의 작은 순간들' },
+  { k: 'baby', label: '아기 성장', sub: '아이가 자라는 하루하루' },
+  { k: 'couple', label: '부부·커플', sub: '둘이 함께 쓰는 기록' },
+  { k: 'pet', label: '반려동물', sub: '우리 아이의 나날' },
+  { k: 'love', label: '연애', sub: '설레는 우리의 기록' },
+  { k: 'hobby', label: '취미', sub: '좋아하는 것들의 기록' },
+  { k: 'run', label: '러닝·운동', sub: '오늘도 달린 나의 기록' },
+  { k: 'plant', label: '식물집사', sub: '초록이들과의 나날' },
+  { k: 'travel', label: '여행', sub: '떠난 곳에서의 순간들' },
+  { k: 'study', label: '공부', sub: '하루의 배움 기록' },
+  { k: 'food', label: '맛집', sub: '맛있던 순간들' },
+  { k: 'free', label: '자유', sub: '무엇이든 담는 나의 일기' },
+];
+function loadCustomTopics() {
+  try { const c = JSON.parse(localStorage.getItem(LS_PREFIX + 'customTopics') || '[]'); return Array.isArray(c) ? c : []; }
+  catch (e) { return []; }
+}
+function saveCustomTopics(c) { localStorage.setItem(LS_PREFIX + 'customTopics', JSON.stringify(c)); }
+function allTopics() { return TOPICS.concat(loadCustomTopics()); }
+/** 사용자 주제 추가 → key 반환 */
+function addCustomTopic(label, sub) {
+  label = (label || '').trim();
+  if (!label) return '';
+  const c = loadCustomTopics();
+  const k = 'c_' + uid();
+  c.push({ k, label: label.slice(0, 16), sub: (sub || label).trim().slice(0, 24), custom: true });
+  saveCustomTopics(c);
+  return k;
+}
+function removeCustomTopic(k) {
+  saveCustomTopics(loadCustomTopics().filter((t) => t.k !== k));
+  if (getTopic() === k) setTopic('');
+}
+function getTopic() { return localStorage.getItem(LS_PREFIX + 'topic') || ''; }
+function setTopic(k) { localStorage.setItem(LS_PREFIX + 'topic', k); }
+function topicInfo() { return allTopics().find((t) => t.k === getTopic()) || null; }
+
+/* 함께 쓰기 — 작성자(멤버) */
+const MEMBER_COLORS = ['#b0713f', '#57b98c', '#7a86b0', '#c25a44', '#e0a13c', '#6a8f6a'];
+function loadMembers() {
+  try {
+    const m = JSON.parse(localStorage.getItem(LS_PREFIX + 'members') || 'null');
+    if (Array.isArray(m) && m.length) return m;
+  } catch (e) {}
+  return [{ id: 'me', name: '나', color: MEMBER_COLORS[0] }];
+}
+function saveMembers(m) { localStorage.setItem(LS_PREFIX + 'members', JSON.stringify(m)); }
+function memberById(id) { return loadMembers().find((m) => m.id === id) || null; }
+let activeAuthor = '';   // 기록 화면에서 선택된 작성자 id
 
 /* 기분별 공감·위로·응원 카드 */
 const MOOD_CARD = {
@@ -377,6 +429,8 @@ function show(id) {
 function openSub(id) { backTo = curScreen; show(id); }
 
 function renderCoverCount() {
+  const t = topicInfo();
+  $('.cover-sub').textContent = t ? t.sub : '목소리와 풍경으로 쓰는 하루';
   $('#cover-count').textContent = entries.length
     ? `지금까지 ${entries.length}개의 순간이 담겨 있어요`
     : '첫 순간을 기다리고 있어요';
@@ -405,7 +459,8 @@ function pageHTML(e, num) {
     const secs = e.durMs ? Math.max(1, Math.round(e.durMs / 1000)) + '초 ' : '';
     media = `<div class="pg-media"><video src="${mediaURL(e)}" muted loop autoplay playsinline></video>${stk}<span class="media-tag">영상 ${secs}· ${filterLabel(e.filter)}</span></div>`;
   }
-  const meta = [e.mood ? `기분 ${moodLabel(e.mood)}` : '', e.weather ? `날씨 ${e.weather}` : '']
+  const who = authorTag(e);
+  const meta = [who ? `${who}` : '', e.mood ? `기분 ${moodLabel(e.mood)}` : '', e.weather ? `날씨 ${e.weather}` : '']
     .filter(Boolean).join('　');
   // 그날 미디어가 2개 이상이면 대표(썸네일) 사진 선택 체크박스
   const dayMediaCount = entries.filter((x) => x.date === e.date && x.thumb).length;
@@ -662,6 +717,7 @@ async function openCapture() {
   if (!captureDate) captureDate = todayStr();
   resetCaptureUI();
   renderCaptureDate();
+  renderAuthorChips();
   camMsg('카메라를 준비하고 있어요…');
   try {
     camStream = await navigator.mediaDevices.getUserMedia({
@@ -1010,14 +1066,14 @@ async function saveEntry() {
     durMs: hasMedia && captured.durMs ? captured.durMs : 0,
     weather: weatherBtn ? weatherBtn.dataset.weather : '',
     mood: moodBtn ? moodBtn.dataset.mood : '',
+    author: activeAuthor || (loadMembers()[0] ? loadMembers()[0].id : ''),
     stickers: hasMedia ? capStickers.slice() : [],
     text,
   };
   await dbPut(entry);
   entries.push(entry);
   sortEntries();
-  pageIndex = entries.indexOf(entry);
-  if (!isMobile()) pageIndex -= pageIndex % 2;
+  pageIndex = entries.indexOf(entry);   // 저장한 일기를 크게 보기로
   toast('일기장에 붙였어요.');
   show('scr-book');
   return entry;
@@ -1533,8 +1589,10 @@ function renderGrid() {
       ? `<img src="${e.thumb}" alt="">`
       : `<span class="grid-textcard">${escapeHTML((e.text || '기록').replace(/\s+/g, ' ').slice(0, 14))}</span>`;
     const tag = e.kind === 'video' ? '<span class="grid-vtag">영상</span>' : '';
+    const am = authorTag(e) ? memberById(e.author) : null;
+    const adot = am ? `<span class="grid-author" style="background:${am.color}" title="${escapeHTML(am.name)}"></span>` : '';
     return `<button class="grid-item" data-idx="${i}" data-k="${k}" style="--jd:${(k % 6) * 0.06}s">
-      ${media}${tag}
+      ${media}${tag}${adot}
       <span class="grid-date">${d.getMonth() + 1}.${d.getDate()}</span>
     </button>`;
   }).join('');
@@ -1795,7 +1853,7 @@ function renderCalEntryList() {
     return `<button class="entry-li" data-idx="${i}">
       <span class="li-thumb">${thumb}</span>
       <span class="li-body">
-        <span class="li-date">${d.getMonth() + 1}월 ${d.getDate()}일 ${DOW[d.getDay()]}요일 ${e.mood ? `· ${moodLabel(e.mood)}` : ''} ${e.weather || ''}</span>
+        <span class="li-date">${d.getMonth() + 1}월 ${d.getDate()}일 ${DOW[d.getDay()]}요일 ${authorTag(e) ? `· ${escapeHTML(authorTag(e))}` : ''} ${e.mood ? `· ${moodLabel(e.mood)}` : ''} ${e.weather || ''}</span>
         <span class="li-text">${snippet}</span>
       </span>
     </button>`;
@@ -1813,7 +1871,9 @@ function renderStats() {
   const photos = entries.filter((e) => e.kind === 'photo').length;
   const clips = entries.filter((e) => e.kind === 'video').length;
   $('#set-stats').textContent =
-    `지금까지 순간 ${entries.length}개 (사진 ${photos} · 짧은 영상 ${clips} · 글 ${entries.length - photos - clips})`;
+    `지금까지 순간 ${entries.length}개 (사진 ${photos} · 영상 ${clips} · 글 ${entries.length - photos - clips})`;
+  renderTopicChips();
+  renderMembers();
 }
 async function wipeAll() {
   const ok = await confirmModal('정말 모든 기록을 지울까요? 사진·영상·글이 전부 사라지고 되돌릴 수 없어요.');
@@ -1832,6 +1892,115 @@ async function wipeAll() {
   await initDB();
   toast('모든 기록을 지웠어요. 새 마음으로 시작해요.');
   show('scr-cover');
+}
+
+/* ==================== 주제 / 온보딩 ==================== */
+function maybeOnboard() {
+  if (getTopic()) { $('#onboard').classList.remove('on'); return; }
+  $('#onboard-topics').innerHTML = allTopics().map((t) => `<button class="chip" data-k="${t.k}">${escapeHTML(t.label)}</button>`).join('');
+  $('#onboard-start').disabled = true;
+  $('#onboard').classList.add('on');
+}
+function renderTopicChips() {
+  const cur = getTopic();
+  $('#topic-chips').innerHTML = allTopics().map((t) =>
+    `<button class="chip ${t.k === cur ? 'on' : ''}${t.custom ? ' custom' : ''}" data-k="${t.k}">${escapeHTML(t.label)}${t.custom ? '<i class="chip-del" data-del="' + t.k + '">✕</i>' : ''}</button>`).join('');
+}
+
+/* ==================== 함께 쓰기 (작성자) ==================== */
+function renderAuthorChips() {
+  const members = loadMembers();
+  const row = $('#author-row');
+  if (members.length < 2) { row.classList.add('hidden'); activeAuthor = members[0] ? members[0].id : ''; return; }
+  row.classList.remove('hidden');
+  if (!members.some((m) => m.id === activeAuthor)) activeAuthor = members[0].id;
+  $('#author-chips').innerHTML = members.map((m) =>
+    `<button class="mchip author-chip ${m.id === activeAuthor ? 'on' : ''}" data-id="${m.id}" style="--mc:${m.color}">${escapeHTML(m.name)}</button>`).join('');
+}
+function renderMembers() {
+  const members = loadMembers();
+  $('#member-list').innerHTML = members.map((m) => `
+    <div class="member-item">
+      <span class="member-dot" style="background:${m.color}"></span>
+      <b>${escapeHTML(m.name)}</b>
+      ${m.id === 'me' ? '<span class="member-me">기본</span>' : `<button class="tbtn danger member-del" data-id="${m.id}">삭제</button>`}
+    </div>`).join('');
+}
+function addMember(name) {
+  name = (name || '').trim();
+  if (!name) { toast('이름을 입력해 주세요.'); return; }
+  const members = loadMembers();
+  if (members.length >= 6) { toast('작성자는 최대 6명까지예요.'); return; }
+  const used = members.map((m) => m.color);
+  const color = MEMBER_COLORS.find((c) => !used.includes(c)) || MEMBER_COLORS[members.length % MEMBER_COLORS.length];
+  members.push({ id: uid(), name, color });
+  saveMembers(members);
+  renderMembers();
+  toast(`${name} 님을 함께 쓰기에 추가했어요.`);
+}
+function removeMember(id) {
+  saveMembers(loadMembers().filter((m) => m.id !== id));
+  renderMembers();
+}
+function authorTag(e) {
+  if (loadMembers().length < 2 || !e.author) return '';
+  const m = memberById(e.author);
+  return m ? m.name : '';
+}
+
+/* ==================== 교환일기 (내보내기 / 가져오기) ==================== */
+function blobToDataURL(blob) {
+  return new Promise((resolve) => { const f = new FileReader(); f.onload = () => resolve(f.result); f.readAsDataURL(blob); });
+}
+async function exportDiary() {
+  toast('내보낼 파일을 준비하고 있어요…');
+  const outEntries = await Promise.all(entries.map(async (e) => {
+    const { blob, ...rest } = e;
+    return { ...rest, media: blob ? await blobToDataURL(blob) : null };
+  }));
+  const data = { app: 'moment-diary', v: 1, topic: getTopic(), customTopics: loadCustomTopics(), members: loadMembers(), covers: loadCovers(), entries: outEntries };
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '순간일기_내보내기.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+  toast('일기를 파일로 내보냈어요. 상대에게 전달해 주세요.');
+}
+async function importDiary(file) {
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data || data.app !== 'moment-diary' || !Array.isArray(data.entries)) throw new Error('bad-file');
+    const existing = new Set(entries.map((e) => e.id));
+    let added = 0;
+    for (const e of data.entries) {
+      if (existing.has(e.id)) continue;
+      const media = e.media;
+      const blob = media ? await (await fetch(media)).blob() : null;
+      const entry = { ...e, blob }; delete entry.media;
+      await dbPut(entry); entries.push(entry); existing.add(e.id); added++;
+    }
+    // 멤버 합치기
+    const mine = loadMembers(); const ids = new Set(mine.map((m) => m.id));
+    (data.members || []).forEach((m) => { if (!ids.has(m.id)) { mine.push(m); ids.add(m.id); } });
+    saveMembers(mine);
+    // 사용자 주제 합치기 (없는 것만 추가)
+    const ct = loadCustomTopics(); const ctk = new Set(ct.map((t) => t.k));
+    (data.customTopics || []).forEach((t) => { if (!ctk.has(t.k)) { ct.push(t); ctk.add(t.k); } });
+    saveCustomTopics(ct);
+    // 대표사진 합치기 (내 것 우선)
+    const cov = loadCovers();
+    Object.entries(data.covers || {}).forEach(([d, id]) => { if (!cov[d]) cov[d] = id; });
+    saveCovers(cov);
+    sortEntries();
+    renderCoverCount();
+    toast(added ? `${added}개의 일기를 가져와 합쳤어요.` : '새로 합칠 일기가 없었어요(이미 있는 기록).');
+    return added;
+  } catch (err) {
+    toast('가져오기에 실패했어요. 올바른 내보내기 파일인지 확인해 주세요.');
+    return 0;
+  }
 }
 
 /* ==================== 기록 알림 ==================== */
@@ -1982,7 +2151,81 @@ function bind() {
     };
   });
   singlePick('.wchip');
-  singlePick('.mchip');
+  singlePick('.mchip:not(.author-chip)');
+
+  // 작성자 선택
+  $('#author-chips').addEventListener('click', (e) => {
+    const b = e.target.closest('.author-chip');
+    if (!b) return;
+    activeAuthor = b.dataset.id;
+    $$('#author-chips .author-chip').forEach((x) => x.classList.toggle('on', x === b));
+  });
+
+  // 온보딩 (주제 선택)
+  let obPick = '';
+  $('#onboard-topics').addEventListener('click', (e) => {
+    const b = e.target.closest('.chip');
+    if (!b) return;
+    obPick = b.dataset.k;
+    $$('#onboard-topics .chip').forEach((x) => x.classList.toggle('on', x === b));
+    $('#onboard-start').disabled = false;
+  });
+  $('#onboard-start').onclick = () => {
+    if (!obPick) return;
+    setTopic(obPick);
+    $('#onboard').classList.remove('on');
+    renderCoverCount();
+  };
+  // 온보딩: 직접 주제 만들기 → 만들고 바로 시작
+  const onboardCreate = () => {
+    const name = $('#onboard-custom-name').value.trim();
+    if (!name) { toast('주제 이름을 입력해 주세요.'); return; }
+    setTopic(addCustomTopic(name));
+    $('#onboard-custom-name').value = '';
+    $('#onboard').classList.remove('on');
+    renderCoverCount();
+  };
+  $('#onboard-custom-add').onclick = onboardCreate;
+  $('#onboard-custom-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') onboardCreate(); });
+
+  // 설정: 주제 변경 / 사용자 주제 삭제
+  $('#topic-chips').addEventListener('click', (e) => {
+    const del = e.target.closest('.chip-del');
+    if (del) { e.stopPropagation(); removeCustomTopic(del.dataset.del); renderTopicChips(); renderCoverCount(); return; }
+    const b = e.target.closest('.chip');
+    if (!b) return;
+    setTopic(b.dataset.k);
+    renderTopicChips();
+    renderCoverCount();
+    toast('일기장 주제를 바꿨어요.');
+  });
+  const addTopicUI = () => {
+    const name = $('#custom-topic-name').value.trim();
+    if (!name) { toast('주제 이름을 입력해 주세요.'); return; }
+    setTopic(addCustomTopic(name));
+    $('#custom-topic-name').value = '';
+    renderTopicChips();
+    renderCoverCount();
+    toast(`'${name}' 주제를 만들었어요.`);
+  };
+  $('#btn-add-topic').onclick = addTopicUI;
+  $('#custom-topic-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') addTopicUI(); });
+  // 설정: 함께 쓰기(멤버)
+  $('#btn-add-member').onclick = () => { addMember($('#member-name').value); $('#member-name').value = ''; };
+  $('#member-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { addMember($('#member-name').value); $('#member-name').value = ''; } });
+  $('#member-list').addEventListener('click', (e) => {
+    const del = e.target.closest('.member-del');
+    if (del) removeMember(del.dataset.id);
+  });
+  // 설정: 교환(내보내기/가져오기)
+  $('#btn-export').onclick = exportDiary;
+  $('#btn-import').onclick = () => $('#import-input').click();
+  $('#import-input').onchange = async (e) => {
+    const file = e.target.files[0];
+    await importDiary(file);
+    e.target.value = '';
+    renderStats();
+  };
 
   $('#btn-shutter').onclick = shutter;
   $('#btn-retake').onclick = retake;
@@ -2103,6 +2346,7 @@ async function init() {
   await loadVlogs();
   pageIndex = maxIndex();
   renderCoverCount();
+  maybeOnboard();
   scheduleReminder();
   // 오프라인 캐시 — https에서만 (file://은 서비스 워커 미지원이라 스킵)
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
@@ -2125,19 +2369,29 @@ window.__diary = {
   speechSupported,
   camState: () => ({ hasStream: !!camStream, filter: camFilter, mode: camMode, recording, captured: (captured && captured.blob) ? captured.kind : null }),
   // 시드용: dataURL을 blob으로 바꿔 엔트리 저장
-  async addEntry({ date, text = '', weather = '', mood = '', filter = 'none', kind = 'none', dataURL = null, stickers = [], durMs = 0 }) {
+  async addEntry({ date, text = '', weather = '', mood = '', filter = 'none', kind = 'none', dataURL = null, stickers = [], durMs = 0, author = '' }) {
     let blob = null, thumb = null;
     if (dataURL) {
       blob = await (await fetch(dataURL)).blob();
       thumb = dataURL;
       if (kind === 'none') kind = 'photo';
     }
-    const entry = { id: uid(), date: date || todayStr(), ts: Date.now(), kind, blob, thumb, filter, durMs, weather, mood, stickers, text };
+    const entry = { id: uid(), date: date || todayStr(), ts: Date.now(), kind, blob, thumb, filter, durMs, weather, mood, author, stickers, text };
     await dbPut(entry);
     entries.push(entry);
     sortEntries();
     return entry.id;
   },
+  // 주제·멤버·교환 훅
+  getTopic, setTopic: (k) => { setTopic(k); renderCoverCount(); },
+  allTopics, addCustomTopic, loadCustomTopics,
+  maybeOnboard, onboardVisible: () => $('#onboard').classList.contains('on'),
+  getMembers: loadMembers, addMember, setActiveAuthor: (id) => { activeAuthor = id; },
+  exportData: async () => {
+    const outEntries = await Promise.all(entries.map(async (e) => { const { blob, ...r } = e; return { ...r, media: blob ? await blobToDataURL(blob) : null }; }));
+    return { app: 'moment-diary', v: 1, topic: getTopic(), customTopics: loadCustomTopics(), members: loadMembers(), covers: loadCovers(), entries: outEntries };
+  },
+  importData: async (obj) => importDiary(new Blob([JSON.stringify(obj)], { type: 'application/json' })),
   // 꾸미기·달력·소리 훅
   addSticker,
   getStickers: () => capStickers.slice(),
