@@ -1552,8 +1552,6 @@ function setJiggle(on) {
 let gridFallen = false;
 let fallenPos = [];   // 위치 인덱스별 이동량 {x,y,r}
 let natRect = [];     // 위치 인덱스별 원래 화면좌표 {left,top,w,h}
-// 결정론적 유사난수 (테스트 재현성 위해 Math.random 대신 인덱스 기반)
-function prand(n) { const s = Math.sin(n * 12.9898) * 43758.5453; return s - Math.floor(s); }
 
 /** 편집 중 스와이프 → 사진이 화면 아래로 떨어져 쌓임(그대로 멈춤) */
 function cascadeGrid() {
@@ -1583,7 +1581,7 @@ function cascadeGrid() {
     gridFallen = true;
     applyFallen(false);   // CSS 애니메이션 → 인라인 transform으로 고정(이후 드래그 가능)
     wrap.classList.add('fallen');
-    $('#grid-hint').textContent = '사진을 끌어 정리하거나, 아래 버튼으로 흐트려요';
+    $('#grid-hint').textContent = '사진을 끌어 옮기거나, 위 「정리하기」를 눌러요';
     $('#grid-fallen-ctrl').classList.remove('hidden');
   }, 900);
 }
@@ -1597,21 +1595,7 @@ function applyFallen(smooth) {
     el.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${p.r}deg)`;
   });
 }
-/** 흐트리기 — 쌓인 사진을 화면 곳곳에 흩뿌림 */
-function scatterGrid() {
-  if (!gridFallen) return;
-  const vw = window.innerWidth, vh = window.innerHeight;
-  fallenPos = fallenPos.map((p, k) => {
-    const r = natRect[k] || { left: 0, top: 0, w: 96, h: 96 };
-    const absX = 10 + prand(k + 1) * Math.max(10, vw - 20 - r.w);
-    const absY = 80 + prand(k + 7) * Math.max(10, vh - 260 - r.h);
-    return { x: Math.round(absX - r.left), y: Math.round(absY - r.top), r: Math.round((prand(k + 3) - 0.5) * 70) };
-  });
-  applyFallen(true);
-  playFx('flip');
-  $('#grid-hint').textContent = '흩어진 사진을 끌어 정리하거나 「정리하기」를 눌러요';
-}
-/** 쌓인/흩어진 사진을 원래대로 */
+/** 쌓인/옮긴 사진을 원래대로 */
 function restoreGrid() {
   gridFallen = false;
   gridJiggle = false;
@@ -1933,7 +1917,6 @@ function bind() {
   // 모아보기 (그리드) — 롱프레스 흔들림 + 위아래 스와이프 와르르, 기분 필터 해제
   bindGrid();
   $('#grid-filter-clear').onclick = () => { gridFilterMood = ''; renderGrid(); };
-  $('#btn-scatter').onclick = scatterGrid;
   $('#btn-tidy').onclick = restoreGrid;
 
   // 브이로그 보관함
@@ -2178,7 +2161,7 @@ window.__diary = {
   },
   reminder: { on: remindOn, time: remindTime, show: showReminderBanner, schedule: scheduleReminder },
   // 모아보기·통계·브이로그 보관함 훅
-  setJiggle, isJiggling: () => gridJiggle, cascadeGrid, restoreGrid, scatterGrid, isFallen: () => gridFallen,
+  setJiggle, isJiggling: () => gridJiggle, cascadeGrid, restoreGrid, isFallen: () => gridFallen,
   fallenPosOf: (k) => (fallenPos[k] ? { ...fallenPos[k] } : null),
   dragItemBy: (k, dx, dy) => { // 테스트용: k번째 사진을 (dx,dy) 만큼 손으로 옮긴 것처럼
     if (!gridFallen || !fallenPos[k]) return;

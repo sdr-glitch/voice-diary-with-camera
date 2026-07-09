@@ -484,26 +484,24 @@ function ok(cond, name) {
   await page.click('#grid-filter-clear');
   ok(await page.evaluate(() => window.__diary.gridFilter()) === '', '전체 보기로 해제');
 
-  console.log('\n[30] 와르르 → 개별 드래그 정리 · 흐트리기 · 정리하기');
+  console.log('\n[30] 와르르 → 개별 드래그 정리 · 정리하기(상단)');
   await page.evaluate(() => window.__diary.show('scr-grid'));
   await page.evaluate(() => window.__diary.setJiggle(true));
   await page.evaluate(() => window.__diary.cascadeGrid());
   await page.waitForTimeout(950);
   ok(await page.evaluate(() => window.__diary.isFallen()), '떨어져 쌓인 상태');
-  ok(await page.isVisible('#grid-fallen-ctrl'), '흐트리기/정리 버튼 표시');
-  // 개별 사진 손으로 옮기기 (한 장의 위치가 바뀜)
+  ok(await page.$('#btn-scatter') === null, '흐트리기 버튼 제거됨');
+  ok(await page.isVisible('#grid-fallen-ctrl') && await page.isVisible('#btn-tidy'), '정리하기 버튼 표시');
+  // 정리하기 버튼이 화면 상단에 위치
+  const ctrlBox = await (await page.$('#grid-fallen-ctrl')).boundingBox();
+  ok(ctrlBox.y < 120, `정리하기 버튼이 상단 (y=${Math.round(ctrlBox.y)})`);
+  // 개별 사진 손으로 옮기기
   const dragB = await page.evaluate(() => window.__diary.fallenPosOf(0));
   await page.evaluate(() => window.__diary.dragItemBy(0, 40, -30));
   const dragA = await page.evaluate(() => window.__diary.fallenPosOf(0));
   ok(dragA.x === dragB.x + 40 && dragA.y === dragB.y - 30, '쌓인 사진을 개별로 끌어서 이동');
   const tf = await page.evaluate(() => document.querySelector('#grid-wrap .grid-item[data-k="0"]').style.transform);
   ok(tf.includes('translate'), `옮긴 위치가 화면에 반영 (${tf.slice(0, 22)}…)`);
-  // 흐트리기 — 여러 장 위치가 제각각으로 바뀜
-  const posBefore = await page.evaluate(() => [0, 1, 2].map((k) => window.__diary.fallenPosOf(k)));
-  await page.click('#btn-scatter');
-  await page.waitForTimeout(100);
-  const posAfter = await page.evaluate(() => [0, 1, 2].map((k) => window.__diary.fallenPosOf(k)));
-  ok(posAfter.some((p, i) => p && posBefore[i] && (p.x !== posBefore[i].x || p.y !== posBefore[i].y)), '흐트리기로 사진들이 흩어짐');
   // 정리하기 → 원래대로
   await page.click('#btn-tidy');
   ok(!(await page.evaluate(() => window.__diary.isFallen())), '정리하기 → 원래대로');
