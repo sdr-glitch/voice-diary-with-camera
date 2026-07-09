@@ -781,6 +781,101 @@ button.cal-day.empty:hover { background: var(--paper-2); }
 .vlog-result-btns { display: flex; gap: 8px; }
 .vlog-result-btns .tbtn { flex: 1; }
 
+/* ============================================================
+   12) 사진 달력 · 일기 목록 · 크게 보기 · 기분 카드/모아보기
+   ============================================================ */
+/* 사진 달력 셀 */
+.cal-grid.photo { gap: 5px; }
+button.cal-day.thumb {
+  background-size: cover; background-position: center;
+  color: #fff; border-radius: 10px; overflow: hidden;
+}
+.cal-day .cal-num {
+  position: absolute; left: 4px; top: 3px; font-size: 11px; font-weight: 700;
+}
+button.cal-day.thumb .cal-num {
+  color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.7);
+}
+button.cal-day.thumb::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,.25) 0%, rgba(0,0,0,0) 40%);
+}
+
+/* 달력 아래 일기 목록 */
+.entry-list {
+  width: min(460px, 96vw); display: flex; flex-direction: column; gap: 8px; margin-top: 12px;
+}
+.entry-li {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: var(--shadow-soft); padding: 8px; cursor: pointer;
+  transition: transform .12s ease;
+}
+.entry-li:active { transform: scale(.99); }
+.li-thumb {
+  position: relative; width: 56px; height: 56px; border-radius: 10px; overflow: hidden;
+  flex-shrink: 0; background: var(--paper-2); display: flex; align-items: center; justify-content: center;
+}
+.li-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.li-noimg { font-size: 12px; color: var(--ink-soft); }
+.li-vtag {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 16px; text-shadow: 0 1px 4px rgba(0,0,0,.6);
+}
+.li-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.li-date { font-size: 12px; color: var(--ink-soft); }
+.li-text { font-size: 14px; color: var(--ink); font-family: var(--serif);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty-note.sm { padding: 22px; font-size: 13px; }
+
+/* 크게 보기(단일 일기) — 흰 페이지 하나 크게 */
+#scr-book .book { max-width: 480px; padding: 0; background: none; border: none; box-shadow: none; }
+#scr-book .book::after { display: none; }
+#scr-book .page.right {
+  border-radius: 18px; box-shadow: var(--shadow); border: 1px solid var(--line);
+  aspect-ratio: auto; min-height: 60vh; padding: 20px 20px 44px;
+}
+#scr-book .pg-media { aspect-ratio: 1 / 1; border-width: 8px; border-bottom-width: 26px; }
+#scr-book .pg-text { font-size: 15px; }
+.pg-cover {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-soft);
+  background: var(--paper-2); border-radius: 10px; padding: 8px 10px;
+}
+
+/* 기분 막대 = 버튼(모아보기) */
+.mood-bar-row {
+  width: 100%; background: none; border: none; padding: 3px 0; cursor: pointer;
+  border-radius: 8px; transition: background .12s ease;
+}
+.mood-bar-row:not(:disabled):hover { background: var(--paper-2); }
+.mood-bar-row:disabled { cursor: default; opacity: .55; }
+.stats-guide { font-size: 12px; color: var(--ink-dim); }
+
+/* 기분 카드 (공감·위로·응원) */
+.mood-card { display: none; }
+.mood-card.show {
+  display: block; border-radius: 14px; padding: 14px 16px;
+  background: var(--paper-2); border: 1px solid var(--line);
+}
+.mood-card p { font-size: 14px; line-height: 1.7; color: var(--ink); }
+.mood-card-tag {
+  display: inline-block; font-size: 11px; font-weight: 700; color: #fff;
+  padding: 2px 10px; border-radius: 999px; margin-bottom: 8px;
+}
+.mood-card.kind-공감 { background: #eef6f0; border-color: #cfe6d7; }
+.mood-card.kind-공감 .mood-card-tag { background: var(--ok); }
+.mood-card.kind-위로 { background: #f1f0f7; border-color: #dcd9ea; }
+.mood-card.kind-위로 .mood-card-tag { background: #7a86b0; }
+.mood-card.kind-응원 { background: #fbf1e8; border-color: #f0dcc6; }
+.mood-card.kind-응원 .mood-card-tag { background: var(--accent); }
+
+/* 모아보기 기분 필터 바 */
+.grid-filter {
+  width: min(560px, 96vw); display: flex; align-items: center; gap: 10px;
+  margin-bottom: 10px; font-size: 13px; color: var(--ink); font-weight: 600;
+}
+.grid-filter .tbtn { margin-left: auto; padding: 6px 12px; font-size: 12px; }
+
 /* ---------- 모바일: 한 페이지씩 ---------- */
 @media (max-width: 720px) {
   .book { width: min(440px, 96vw); }
@@ -790,6 +885,6 @@ button.cal-day.empty:hover { background: var(--paper-2); }
   .book-top .app-title { font-size: 17px; }
   .tbtn { padding: 7px 11px; font-size: 12px; }
   .cal-screen-card, .vlog-card, .set-card, .cap-card, .grid-wrap,
-  .stats-card, .vloglib-wrap, .top-bar, .big-cta { width: 96vw; }
+  .stats-card, .vloglib-wrap, .top-bar, .big-cta, .entry-list, .grid-filter { width: 96vw; }
   .grid-wrap { grid-template-columns: repeat(3, 1fr); }
 }

@@ -36,17 +36,22 @@
       <span id="cal-title"></span>
       <button class="nav-arrow sm" id="cal-next" aria-label="다음 달">▶</button>
     </div>
-    <div class="cal-grid" id="cal-grid"></div>
-    <p class="cal-hint">어느 날짜든 눌러서 그날을 채우거나 다시 볼 수 있어요.</p>
+    <div class="cal-grid photo" id="cal-grid"></div>
+    <p class="cal-hint">사진이 있는 날은 눌러 크게 보고, 빈 날은 눌러 채울 수 있어요.</p>
   </div>
+  <div class="entry-list" id="cal-entry-list"></div>
 </section>
 
 <!-- ============ 모아보기 (그리드 갤러리) ============ -->
 <section id="scr-grid" class="screen hidden tabscr">
   <header class="top-bar">
-    <h1 class="app-title">모아보기</h1>
+    <h1 class="app-title" id="grid-title">모아보기</h1>
     <span class="top-hint" id="grid-hint">길게 눌러 편집 · 위아래로 쓸면 와르르</span>
   </header>
+  <div class="grid-filter hidden" id="grid-filter">
+    <span id="grid-filter-label"></span>
+    <button class="tbtn" id="grid-filter-clear">전체 보기</button>
+  </div>
   <div class="grid-wrap" id="grid-wrap"></div>
 </section>
 
@@ -60,6 +65,8 @@
       <button class="nav-arrow sm" id="stats-next" aria-label="다음 달">▶</button>
     </div>
     <p class="stats-summary" id="stats-summary"></p>
+    <div class="mood-card" id="mood-card"></div>
+    <p class="stats-guide">기분을 누르면 그 기분의 일기만 모아 볼 수 있어요.</p>
     <div class="mood-chart" id="mood-chart"></div>
     <p class="stats-note" id="stats-note"></p>
   </div>
@@ -72,7 +79,7 @@
   <div class="vloglib-wrap" id="vloglib-wrap"></div>
 </section>
 
-<!-- ============ 책 (일기장 상세) ============ -->
+<!-- ============ 일기 크게 보기 (한 화면에 하나) ============ -->
 <section id="scr-book" class="screen hidden">
   <div class="book-top">
     <button class="tbtn" id="btn-book-back">돌아가기</button>
@@ -80,13 +87,12 @@
     <span class="top-spacer"></span>
   </div>
   <div class="book" id="book">
-    <div class="page left" id="page-left"></div>
     <div class="page right" id="page-right"></div>
   </div>
   <div class="book-nav">
-    <button class="nav-arrow" id="btn-prev" aria-label="이전 페이지">◀</button>
+    <button class="nav-arrow" id="btn-prev" aria-label="이전 일기">◀</button>
     <span id="pg-indicator"></span>
-    <button class="nav-arrow" id="btn-next" aria-label="다음 페이지">▶</button>
+    <button class="nav-arrow" id="btn-next" aria-label="다음 일기">▶</button>
   </div>
 </section>
 

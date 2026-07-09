@@ -140,6 +140,7 @@ function ok(cond, name) {
   ok(await page.isVisible('#deco-box'), '촬영 후 꾸미기 도구 표시');
   await page.click('#sticker-palette .schip');
   const lay = await page.$('#sticker-layer');
+  await lay.scrollIntoViewIfNeeded();  // 촬영 카드가 길어 스티커 무대가 화면 밖일 수 있음
   const lb = await lay.boundingBox();
   await page.mouse.move(lb.x + lb.width * 0.5, lb.y + lb.height * 0.5);
   await page.mouse.down();
@@ -429,7 +430,59 @@ function ok(cond, name) {
   });
   ok(coverBg.includes('rgb(255, 255, 255)'), `표지가 흰색 계열 (${coverBg.slice(0, 60)}…)`);
 
-  console.log('\n[27] PWA 구성');
+  console.log('\n[27] 달력 아래 일기 목록 → 크게 보기');
+  await page.evaluate(() => window.__diary.goCalendar('2026-07'));
+  await page.waitForTimeout(120);
+  ok((await page.$$eval('#cal-entry-list .entry-li', (n) => n.length)) > 0, '달력 아래 일기 목록 표시');
+  await page.click('#cal-entry-list .entry-li');
+  ok(await page.isVisible('#scr-book'), '목록 클릭 → 크게 보기 화면');
+  ok((await page.$$eval('#book .page', (n) => n.length)) === 1, '한 화면에 일기 하나(크게)');
+  await page.click('#btn-book-back');
+  ok(await page.isVisible('#scr-cal'), '돌아가기 → 달력');
+
+  console.log('\n[28] 사진 달력 + 하루 여러 장 중 대표 썸네일 선택');
+  // 같은 날에 사진 2장 시드 (대표 선택은 id 기준)
+  await page.evaluate(async (png) => {
+    await window.__diary.addEntry({ date: '2026-07-19', text: '첫번째 사진', dataURL: png, kind: 'photo' });
+    await window.__diary.addEntry({ date: '2026-07-19', text: '두번째 사진', dataURL: png, kind: 'photo' });
+  }, PNG);
+  await page.evaluate(() => window.__diary.goCalendar('2026-07'));
+  await page.waitForTimeout(100);
+  ok((await page.$$eval('.cal-day.thumb', (n) => n.length)) > 0, '사진 있는 날은 썸네일 셀로 표시');
+  // 대표사진: 기본은 그날 첫 미디어. 두번째로 바꾸기(훅) → coverEntryId 변경
+  const entries19 = await page.evaluate(() => window.__diary.getEntries().filter((e) => e.date === '2026-07-19').map((e) => e.id));
+  const defCover = await page.evaluate(() => window.__diary.coverEntryId('2026-07-19'));
+  await page.evaluate((id) => window.__diary.setCover('2026-07-19', id), entries19[1]);
+  const newCover = await page.evaluate(() => window.__diary.coverEntryId('2026-07-19'));
+  ok(defCover !== newCover && newCover === entries19[1], '대표(썸네일) 사진 선택 변경');
+
+  console.log('\n[29] 기분별 일기 모아보기 + 공감/위로/응원 카드');
+  await page.evaluate(() => window.__diary.show('scr-stats'));
+  await page.evaluate(() => { const s = document.querySelector('#stats-title'); });
+  // 통계는 오늘 달 기준 — 7월로 맞추기 위해 statsCounts 호출로 세팅
+  await page.evaluate(() => window.__diary.statsCounts('2026-07'));
+  await page.evaluate(() => window.__diary.show('scr-stats'));
+  await page.waitForTimeout(100);
+  ok(await page.isVisible('#mood-card.show'), '기분 카드(공감/위로/응원) 표시');
+  const cardTag = await page.textContent('.mood-card-tag');
+  ok(['공감', '위로', '응원'].includes(cardTag.trim()), `카드 종류: ${cardTag.trim()}`);
+  // 기분 눌러 모아보기
+  await page.evaluate(() => window.__diary.openMoodCollection('행복'));
+  ok(await page.isVisible('#scr-grid') && await page.evaluate(() => window.__diary.gridFilter()) === '행복', '기분(행복) 모아보기로 이동');
+  ok(await page.isVisible('#grid-filter'), '기분 필터 바 표시');
+  const allHappy = await page.evaluate(() => window.__diary.getEntries().filter((e) => e.mood === '행복').length);
+  ok((await page.evaluate(() => window.__diary.gridCount())) === allHappy, `행복 일기만 모임 (${allHappy}개)`);
+  await page.click('#grid-filter-clear');
+  ok(await page.evaluate(() => window.__diary.gridFilter()) === '', '전체 보기로 해제');
+
+  console.log('\n[30] 편집 모드 와르르(스크롤 아닌 애니메이션)');
+  await page.evaluate(() => window.__diary.show('scr-grid'));
+  await page.evaluate(() => window.__diary.setJiggle(true));
+  await page.evaluate(() => window.__diary.cascadeGrid());
+  ok((await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length)) > 0, '와르르 낙하 애니메이션 작동');
+  await page.evaluate(() => window.__diary.setJiggle(false));
+
+  console.log('\n[31] PWA 구성');
   const root = path.resolve(__dirname, '..');
   const mf = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   ok(mf.name && mf.icons.length >= 2 && mf.display === 'standalone', 'manifest 필수 필드');

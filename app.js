@@ -52,8 +52,37 @@ let userAudioName = '';
 
 let captureDate = null;   // 기록 중인 날짜(YYYY-MM-DD) — 달력에서 지난 날 채우기 지원
 let reminderTimer = 0;    // 알림 예약 타이머
+let gridFilterMood = '';  // 모아보기 기분 필터
 const DEFAULT_OUTRO = '이번 달도 수고했어';
 const APP_NAME = '순간일기';
+
+/** 날짜별 대표(썸네일) 사진 선택 — { 'YYYY-MM-DD': entryId } */
+function loadCovers() {
+  try { return JSON.parse(localStorage.getItem(LS_PREFIX + 'covers') || '{}'); } catch (e) { return {}; }
+}
+function saveCovers(m) { localStorage.setItem(LS_PREFIX + 'covers', JSON.stringify(m)); }
+function setCover(date, id) { const m = loadCovers(); m[date] = id; saveCovers(m); }
+/** 그 날의 대표 이미지가 될 엔트리(선택값 우선 → 없으면 그날 첫 미디어) */
+function coverEntry(date) {
+  const chosenId = loadCovers()[date];
+  const dayMedia = entries.filter((e) => e.date === date && e.thumb);
+  if (chosenId) { const c = dayMedia.find((e) => e.id === chosenId); if (c) return c; }
+  return dayMedia[0] || null;
+}
+function isCover(e) {
+  return coverEntry(e.date) && coverEntry(e.date).id === e.id;
+}
+
+/* 기분별 공감·위로·응원 카드 */
+const MOOD_CARD = {
+  설렘: { kind: '공감', msg: '설레는 마음, 그 두근거림을 오래 기억해요.' },
+  행복: { kind: '공감', msg: '행복한 순간들이 차곡차곡 쌓이고 있어요.' },
+  평온: { kind: '공감', msg: '잔잔한 하루도, 그 자체로 충분히 좋은 날이에요.' },
+  그저그럼: { kind: '응원', msg: '무던한 날도 잘 지나왔어요. 그걸로 충분해요.' },
+  지침: { kind: '위로', msg: '오늘 참 많이 애썼어요. 조금 쉬어가도 괜찮아요.' },
+  울적: { kind: '위로', msg: '울적한 마음, 여기 적어두는 것만으로 조금 가벼워져요.' },
+  속상: { kind: '위로', msg: '속상했던 마음, 이 페이지에 다 내려놓아도 돼요.' },
+};
 
 const mediaURLCache = new Map();  // entry.id -> objectURL (세션 캐시)
 
@@ -377,10 +406,16 @@ function pageHTML(e, num) {
   }
   const meta = [e.mood ? `기분 ${moodLabel(e.mood)}` : '', e.weather ? `날씨 ${e.weather}` : '']
     .filter(Boolean).join('　');
+  // 그날 미디어가 2개 이상이면 대표(썸네일) 사진 선택 체크박스
+  const dayMediaCount = entries.filter((x) => x.date === e.date && x.thumb).length;
+  const coverPick = (e.thumb && dayMediaCount > 1)
+    ? `<label class="pg-cover"><input type="checkbox" class="cover-chk" data-id="${e.id}" data-date="${e.date}" ${isCover(e) ? 'checked' : ''}> 이 날의 대표 사진(달력 썸네일)으로</label>`
+    : '';
   return `
     <div class="pg-date">${fmtDateKo(e.date)} <span class="pg-dow">${DOW[d.getDay()]}요일</span></div>
     ${meta ? `<div class="pg-meta">${meta}</div>` : ''}
     ${media}
+    ${coverPick}
     <div class="pg-text">${escapeHTML(e.text || '')}</div>
     <button class="pg-del" data-id="${e.id}" title="이 기록 지우기" aria-label="이 기록 지우기">지우기</button>
     <span class="pg-num">${num}</span>`;
@@ -396,31 +431,16 @@ function moodLabel(m) {
   return { 설렘: '설렘', 행복: '행복', 평온: '평온', 그저그럼: '그저 그럼', 지침: '지침', 울적: '울적', 속상: '속상' }[m] || m;
 }
 
-function step() { return isMobile() ? 1 : 2; }
-function maxIndex() {
-  if (!entries.length) return 0;
-  const st = step();
-  return Math.max(0, Math.floor((entries.length - 1) / st) * st);
-}
-function clampIndex() {
-  pageIndex = Math.min(Math.max(0, pageIndex), maxIndex());
-  if (!isMobile()) pageIndex -= pageIndex % 2;
-}
+function step() { return 1; } // 한 화면에 일기 하나씩 크게
+function maxIndex() { return Math.max(0, entries.length - 1); }
+function clampIndex() { pageIndex = Math.min(Math.max(0, pageIndex), maxIndex()); }
 
 function renderSpread() {
   clampIndex();
-  const L = $('#page-left'), R = $('#page-right');
-  if (isMobile()) {
-    R.innerHTML = pageHTML(entries[pageIndex], pageIndex + 1);
-  } else {
-    L.innerHTML = pageHTML(entries[pageIndex], pageIndex + 1);
-    R.innerHTML = pageHTML(entries[pageIndex + 1], pageIndex + 2);
-  }
+  $('#page-right').innerHTML = pageHTML(entries[pageIndex], pageIndex + 1);
   sizePageStickers();
   const total = Math.max(entries.length, 1);
-  $('#pg-indicator').textContent = isMobile()
-    ? `${Math.min(pageIndex + 1, total)} / ${total}쪽`
-    : `${pageIndex + 1}–${Math.min(pageIndex + 2, total)} / ${total}쪽`;
+  $('#pg-indicator').textContent = `${Math.min(pageIndex + 1, total)} / ${total}`;
   $('#btn-prev').disabled = pageIndex <= 0;
   $('#btn-next').disabled = pageIndex >= maxIndex();
 }
@@ -1475,13 +1495,34 @@ let gridJiggle = false;
 let cascading = false;
 function gridSortedRefs() {
   return entries.map((e, i) => ({ e, i }))
+    .filter(({ e }) => !gridFilterMood || e.mood === gridFilterMood)
     .sort((a, b) => (a.e.date === b.e.date ? b.e.ts - a.e.ts : (a.e.date < b.e.date ? 1 : -1)));
 }
+/** 기분별 일기 모아보기 — 통계에서 기분을 누르면 호출 */
+function openMoodCollection(mood) {
+  gridFilterMood = mood;
+  show('scr-grid');
+}
+function renderGridFilterBar() {
+  const bar = $('#grid-filter');
+  if (gridFilterMood) {
+    bar.classList.remove('hidden');
+    const card = MOOD_CARD[gridFilterMood];
+    $('#grid-filter-label').textContent = `「${moodLabel(gridFilterMood)}」 기분의 일기` + (card ? ` · ${card.kind}` : '');
+    $('#grid-title').textContent = '기분 모아보기';
+  } else {
+    bar.classList.add('hidden');
+    $('#grid-title').textContent = '모아보기';
+  }
+}
 function renderGrid() {
+  renderGridFilterBar();
   const wrap = $('#grid-wrap');
   const refs = gridSortedRefs();
   if (!refs.length) {
-    wrap.innerHTML = '<p class="empty-note">아직 기록이 없어요.<br>아래 ＋ 버튼으로 첫 순간을 담아보세요.</p>';
+    wrap.innerHTML = gridFilterMood
+      ? `<p class="empty-note">「${moodLabel(gridFilterMood)}」 기분으로 남긴 일기가 아직 없어요.</p>`
+      : '<p class="empty-note">아직 기록이 없어요.<br>아래 ＋ 버튼으로 첫 순간을 담아보세요.</p>';
     wrap.classList.remove('jiggle');
     return;
   }
@@ -1524,16 +1565,24 @@ function cascadeGrid() {
 /** 그리드 제스처: 길게 누르면 흔들림(편집) 토글, 편집 중 위아래로 쓸면 와르르 */
 function bindGrid() {
   const gw = $('#grid-wrap');
-  let lpTimer = 0, startY = 0, moved = false, suppressClick = false;
+  let lpTimer = 0, startY = 0, suppressClick = false;
   gw.addEventListener('pointerdown', (e) => {
-    startY = e.clientY; moved = false;
+    startY = e.clientY;
     clearTimeout(lpTimer);
     lpTimer = setTimeout(() => { setJiggle(); suppressClick = true; }, 450);
   });
   gw.addEventListener('pointermove', (e) => {
-    if (Math.abs(e.clientY - startY) > 12) { moved = true; clearTimeout(lpTimer); }
-    if (gridJiggle && Math.abs(e.clientY - startY) > 55) cascadeGrid();
+    if (Math.abs(e.clientY - startY) > 12) clearTimeout(lpTimer);
+    if (gridJiggle && Math.abs(e.clientY - startY) > 45) cascadeGrid();
   });
+  // 편집 모드에서 세로 스와이프가 스크롤로 새지 않도록 (touchmove는 비-passive로 preventDefault)
+  gw.addEventListener('touchmove', (e) => {
+    if (gridJiggle) {
+      const y = e.touches[0].clientY;
+      if (Math.abs(y - startY) > 45) cascadeGrid();
+      e.preventDefault();
+    }
+  }, { passive: false });
   const end = () => { clearTimeout(lpTimer); };
   gw.addEventListener('pointerup', end);
   gw.addEventListener('pointercancel', end);
@@ -1568,19 +1617,27 @@ function renderMoodStats() {
   let withMood = 0;
   monthEntries.forEach((e) => { if (e.mood && counts[e.mood] !== undefined) { counts[e.mood]++; withMood++; } });
   const max = Math.max(1, ...MOODS.map((k) => counts[k]));
+  // 기분 막대 = 누르면 그 기분 일기 모아보기 (버튼)
   $('#mood-chart').innerHTML = MOODS.map((k) => `
-    <div class="mood-bar-row">
+    <button class="mood-bar-row" data-mood="${k}" ${counts[k] ? '' : 'disabled'}>
       <span class="mood-name">${moodLabel(k)}</span>
       <div class="mood-track"><div class="mood-fill" style="width:${Math.round(counts[k] / max * 100)}%;background:${MOOD_COLOR[k]}"></div></div>
       <span class="mood-cnt">${counts[k]}</span>
-    </div>`).join('');
+    </button>`).join('');
   if (!withMood) {
     $('#stats-summary').textContent = '이 달엔 기분을 기록한 날이 아직 없어요.';
     $('#stats-note').textContent = '기록할 때 오늘의 기분을 함께 골라보세요.';
+    $('#mood-card').className = 'mood-card';
+    $('#mood-card').innerHTML = '';
   } else {
     const top = MOODS.reduce((a, b) => (counts[b] > counts[a] ? b : a));
     $('#stats-summary').textContent = `이번 달 가장 많이 느낀 기분은 「${moodLabel(top)}」이에요.`;
     $('#stats-note').textContent = `기분을 남긴 날 ${withMood}일 · 이 달 기록 ${monthEntries.length}개`;
+    const card = MOOD_CARD[top];
+    if (card) {
+      $('#mood-card').className = 'mood-card show kind-' + card.kind;
+      $('#mood-card').innerHTML = `<span class="mood-card-tag">${card.kind}</span><p>${card.msg}</p>`;
+    }
   }
 }
 
@@ -1617,20 +1674,47 @@ function renderCal() {
     const isFuture = ds > today;
     const tcls = isToday ? ' today' : '';
     if (idx !== undefined) {
-      // 기록 있는 날 → 그날 페이지로
-      html += `<button class="cal-day has${tcls}" data-idx="${idx}">${d}<i></i></button>`;
+      // 기록 있는 날 — 대표 사진이 있으면 썸네일 셀, 없으면(글만) 점 셀
+      const cov = coverEntry(ds);
+      if (cov && cov.thumb) {
+        html += `<button class="cal-day has thumb${tcls}" data-idx="${idx}" style="background-image:url('${cov.thumb}')"><span class="cal-num">${d}</span></button>`;
+      } else {
+        html += `<button class="cal-day has${tcls}" data-idx="${idx}">${d}<i></i></button>`;
+      }
     } else if (isFuture) {
-      // 미래 날짜는 아직 채울 수 없음
       html += `<span class="cal-day future">${d}</span>`;
     } else {
-      // 기록 없는 지난 날/오늘 → 눌러서 그날 채우기
       html += `<button class="cal-day empty${tcls}" data-date="${ds}">${d}</button>`;
     }
   }
   $('#cal-grid').innerHTML = html;
+  renderCalEntryList();
+}
+
+/** 달력 아래 — 그달 일기 목록 (누르면 크게 보기) */
+function renderCalEntryList() {
+  const wrap = $('#cal-entry-list');
+  const list = entries.map((e, i) => ({ e, i }))
+    .filter(({ e }) => e.date.slice(0, 7) === calYM)
+    .sort((a, b) => (a.e.date === b.e.date ? b.e.ts - a.e.ts : (a.e.date < b.e.date ? 1 : -1)));
+  if (!list.length) { wrap.innerHTML = '<p class="empty-note sm">이 달엔 아직 기록이 없어요.</p>'; return; }
+  wrap.innerHTML = list.map(({ e, i }) => {
+    const d = parseDate(e.date);
+    const thumb = e.thumb
+      ? `<img src="${e.thumb}" alt="">${e.kind === 'video' ? '<span class="li-vtag">▶</span>' : ''}`
+      : '<span class="li-noimg">글</span>';
+    const snippet = escapeHTML((e.text || '').replace(/\s+/g, ' ').trim().slice(0, 40)) || (e.mood ? moodLabel(e.mood) : '기록');
+    return `<button class="entry-li" data-idx="${i}">
+      <span class="li-thumb">${thumb}</span>
+      <span class="li-body">
+        <span class="li-date">${d.getMonth() + 1}월 ${d.getDate()}일 ${DOW[d.getDay()]}요일 ${e.mood ? `· ${moodLabel(e.mood)}` : ''} ${e.weather || ''}</span>
+        <span class="li-text">${snippet}</span>
+      </span>
+    </button>`;
+  }).join('');
 }
 function jumpToEntry(idx) {
-  pageIndex = isMobile() ? idx : idx - (idx % 2);
+  pageIndex = idx;
   backTo = TAB_SCREENS.includes(curScreen) ? curScreen : 'scr-cal';
   playFx('flip');
   show('scr-book');
@@ -1707,8 +1791,10 @@ function bind() {
   $('#cal-home-title').onclick = () => show('scr-cover');
   $('#book-home-title').onclick = () => show('scr-cover');
 
-  // 하단 탭
-  $$('#bottomnav .navbtn').forEach((b) => { b.onclick = () => show(b.dataset.scr); });
+  // 하단 탭 (모아보기 탭은 기분 필터 해제하고 전체)
+  $$('#bottomnav .navbtn').forEach((b) => {
+    b.onclick = () => { if (b.dataset.scr === 'scr-grid') gridFilterMood = ''; show(b.dataset.scr); };
+  });
   // 플로팅 기록 버튼
   $('#fab').onclick = () => openCaptureFor(todayStr());
 
@@ -1721,13 +1807,23 @@ function bind() {
     if (day.dataset.date) { openCaptureFor(day.dataset.date); return; } // 지난 날/오늘 채우기
     if (day.classList.contains('has')) jumpToEntry(Number(day.dataset.idx));
   });
+  // 달력 아래 일기 목록 → 크게 보기
+  $('#cal-entry-list').addEventListener('click', (e) => {
+    const li = e.target.closest('.entry-li');
+    if (li) jumpToEntry(Number(li.dataset.idx));
+  });
 
-  // 기분 통계
+  // 기분 통계 — 월 이동 + 기분 눌러 모아보기
   $('#stats-prev').onclick = () => shiftStatsMonth(-1);
   $('#stats-next').onclick = () => shiftStatsMonth(1);
+  $('#mood-chart').addEventListener('click', (e) => {
+    const row = e.target.closest('.mood-bar-row');
+    if (row && !row.disabled) openMoodCollection(row.dataset.mood);
+  });
 
-  // 모아보기 (그리드) — 롱프레스 흔들림 + 위아래 스와이프 와르르
+  // 모아보기 (그리드) — 롱프레스 흔들림 + 위아래 스와이프 와르르, 기분 필터 해제
   bindGrid();
+  $('#grid-filter-clear').onclick = () => { gridFilterMood = ''; renderGrid(); };
 
   // 브이로그 보관함
   $('#btn-new-vlog').onclick = () => openSub('scr-vlog');
@@ -1750,6 +1846,14 @@ function bind() {
     const del = e.target.closest('.pg-del');
     if (del) { deleteEntryUI(del.dataset.id); return; }
     if (e.target.closest('.pg-empty')) openCaptureFor(todayStr());
+  });
+  // 대표(썸네일) 사진 선택
+  $('#book').addEventListener('change', (e) => {
+    const chk = e.target.closest('.cover-chk');
+    if (!chk) return;
+    if (chk.checked) { setCover(chk.dataset.date, chk.dataset.id); toast('이 사진을 달력 대표로 정했어요.'); }
+    else { const m = loadCovers(); delete m[chk.dataset.date]; saveCovers(m); }
+    renderSpread();
   });
 
   $('#btn-prev').onclick = () => flip(-1);
@@ -1971,6 +2075,9 @@ window.__diary = {
     return c; },
   saveVlogToLib, getVlogs: () => vlogs.map((v) => ({ id: v.id, ym: v.ym, title: v.title, size: v.blob ? v.blob.size : 0 })),
   deleteVlogNow: async (id) => { await vlogDelete(id); await loadVlogs(); renderVlogLib(); },
+  // 대표 사진·기분 모아보기·달력 훅
+  setCover, coverEntryId: (date) => { const c = coverEntry(date); return c ? c.id : null; },
+  openMoodCollection, gridFilter: () => gridFilterMood,
   // 폴라로이드 프레임 렌더 검증 (영상 재생 없이 한 장면 그려 픽셀 확인)
   async renderPolaroidTest(dataURL) {
     const W = 720, H = 540;
