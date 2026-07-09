@@ -82,23 +82,6 @@
   <div class="vloglib-wrap" id="vloglib-wrap"></div>
 </section>
 
-<!-- ============ 일기 크게 보기 (한 화면에 하나) ============ -->
-<section id="scr-book" class="screen hidden">
-  <div class="book-top">
-    <button class="tbtn" id="btn-book-back">돌아가기</button>
-    <h1 class="app-title" id="book-home-title">순간일기</h1>
-    <span class="top-spacer"></span>
-  </div>
-  <div class="book" id="book">
-    <div class="page right" id="page-right"></div>
-  </div>
-  <div class="book-nav">
-    <button class="nav-arrow" id="btn-prev" aria-label="이전 일기">◀</button>
-    <span id="pg-indicator"></span>
-    <button class="nav-arrow" id="btn-next" aria-label="다음 일기">▶</button>
-  </div>
-</section>
-
 <!-- ============ 기록 (카메라 + 음성) ============ -->
 <section id="scr-capture" class="screen hidden">
   <div class="cap-head">
@@ -107,6 +90,7 @@
   </div>
   <div class="cap-card">
     <div class="cap-datebar" id="cap-datebar"></div>
+    <div class="cap-edit-banner hidden" id="cap-edit-banner">이 기록을 수정하는 중이에요. 새로 찍거나 골라 사진을 바꾸고, 아래 내용을 고칠 수 있어요.</div>
     <div class="cam-stage">
       <canvas id="cam-canvas"></canvas>
       <video id="cap-preview-video" class="hidden" playsinline muted loop></video>
@@ -298,6 +282,14 @@
   <div class="set-card">
     <h2>이 앱은요</h2>
     <p>모든 기록(사진·영상·글)은 <b>이 기기 안에만</b> 저장돼요. 인터넷으로 어디에도 전송되지 않아요. 다만 브라우저 데이터를 지우면 기록도 함께 사라지니, 소중한 달은 브이로그나 내보내기로 저장해 두세요.</p>
+  </div>
+  <div class="set-card">
+    <h2>사진 꾸미기</h2>
+    <p>일기 속 사진의 폴라로이드 프레임과, 사진 위 마스킹 테이프 색을 골라요.</p>
+    <span class="lbl">프레임 색</span>
+    <div class="chip-row" id="frame-chips"></div>
+    <span class="lbl">마스킹 테이프 색</span>
+    <div class="chip-row" id="tape-chips"></div>
   </div>
   <div class="set-card">
     <h2>알림</h2>

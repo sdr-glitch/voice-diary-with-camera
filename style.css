@@ -183,9 +183,10 @@ textarea, select, input { font-family: inherit; }
   box-shadow: 0 4px 14px rgba(60,45,25,.22);
   position: relative;
   flex-shrink: 0;
-  /* 폴라로이드 느낌 테두리 */
-  border: 6px solid #fffdf7;
-  border-bottom-width: 22px;
+  /* 폴라로이드 프레임 (색: 사용자 설정 --frame) */
+  border: 7px solid var(--frame, #fffdf7);
+  border-bottom-width: 26px;
+  overflow: visible;
 }
 .pg-media img, .pg-media video {
   width: 100%; height: 100%; object-fit: cover; display: block;
@@ -193,8 +194,22 @@ textarea, select, input { font-family: inherit; }
 .pg-media .media-tag {
   position: absolute; right: 6px; top: 6px;
   background: rgba(0,0,0,.45); color: #fff; font-size: 11px;
-  padding: 2px 8px; border-radius: 999px;
+  padding: 2px 8px; border-radius: 999px; z-index: 3;
 }
+/* 사진 위 마스킹 테이프 (고정 · 색: --tape) */
+.masking-tape {
+  position: absolute; top: -16px; left: 50%;
+  width: 92px; height: 26px; transform: translateX(-50%) rotate(-3.5deg);
+  background: var(--tape, rgba(240,225,190,.72));
+  box-shadow: 0 1px 3px rgba(0,0,0,.12);
+  z-index: 4; pointer-events: none;
+}
+.masking-tape::before, .masking-tape::after {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 6px;
+  background-image: linear-gradient(90deg, rgba(255,255,255,.25) 50%, transparent 50%);
+  background-size: 3px 100%;
+}
+.masking-tape::before { left: 0; } .masking-tape::after { right: 0; }
 .pg-text {
   font-family: var(--serif);
   font-size: 14px; line-height: 1.95;
@@ -949,6 +964,38 @@ button.cal-day.sel.thumb { box-shadow: 0 0 0 2.5px var(--accent); }
   margin-bottom: 10px; font-size: 13px; color: var(--ink); font-weight: 600;
 }
 .grid-filter .tbtn { margin-left: auto; padding: 6px 12px; font-size: 12px; }
+
+/* ============================================================
+   13) 달력 아래 크게보기 카드(수정) · 사진 꾸미기(프레임/테이프)
+   ============================================================ */
+.big-entry {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: var(--shadow-soft); padding: 16px; margin-bottom: 14px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.big-entry .pg-meta { font-size: 13px; color: var(--ink-soft); }
+.big-entry .pg-media { aspect-ratio: 1 / 1; width: 90%; margin: 8px auto 4px; }
+.be-editphoto { align-self: center; padding: 6px 16px; font-size: 12px; }
+.be-text {
+  width: 100%; min-height: 72px; resize: vertical;
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+  font-size: 15px; line-height: 1.9; font-family: var(--serif);
+  background: #fffdf7; color: var(--ink);
+}
+.be-actions { display: flex; justify-content: flex-end; }
+.be-actions .tbtn { padding: 6px 12px; font-size: 12px; }
+.be-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px 10px; }
+
+/* 기록 수정 안내 배너 */
+.cap-edit-banner {
+  font-size: 12px; color: var(--accent-2); background: #fbf1e8;
+  border: 1px solid #f0dcc6; border-radius: 10px; padding: 8px 11px; line-height: 1.6;
+}
+
+/* 색 스와치 칩 (프레임/테이프) */
+.chip.swatch { display: inline-flex; align-items: center; gap: 7px; padding-left: 9px; }
+.sw-dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.frame-dark .pg-media { box-shadow: 0 8px 18px rgba(0,0,0,.3); }
 
 /* ---------- 모바일: 한 페이지씩 ---------- */
 @media (max-width: 720px) {

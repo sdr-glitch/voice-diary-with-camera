@@ -50,8 +50,10 @@
 - **날짜 채우기**: `captureDate`가 기록 대상 날짜. `openCaptureFor(date)`로 달력의 지난 날/오늘 진입. 갤러리 가져오기 `importFromGallery(file)`(사진은 필터 적용, 영상은 원본+메타 durMs).
 - **브이로그 폴라로이드**: `polaroidGeom/drawPolaroidFrame/drawMediaCover(zoom)/polaroidStickers/polaroidCaption`. 사진은 켄번즈(zoom 1→1.09), 영상은 그대로. 아웃트로는 `opts.outro`(수정·저장, 기본 `DEFAULT_OUTRO`) + `APP_NAME` 고정 소자막. **브이로그는 사진·영상만**(글만 있는 날 제외 — `buildClipList`/`buildVlog`에서 필터).
 - **모아보기**(`renderGrid`): 최신순 격자, `gridFilterMood`로 기분 필터. `bindGrid()` — 롱프레스(450ms): 쌓인 상태면 `restoreGrid`, 아니면 `setJiggle` 토글. 편집 중 위아래 스와이프(>45px) `cascadeGrid`. **편집 중엔 `touchmove`를 비-passive로 `preventDefault`해 스크롤 대신 와르르**. **와르르: 바닥 근처 목표를 계산해 떨어져 쌓임(`gridFallen`), 낙하 후 `applyFallen`이 CSS애니메이션→인라인 transform으로 고정해 개별 드래그 가능**. 쌓인 뒤 각 사진을 손으로 끌어 정리(`fallenPos[k]` 갱신), `scatterGrid`(흐트리기)로 화면 곳곳에 흩뿌림, `restoreGrid`(정리하기/빈 곳 길게 누르기)로 원복. `#grid-fallen-ctrl`(흐트리기·정리하기) 버튼은 쌓임 상태에만 표시. 탭 시 `jumpToEntry`.
-- **크게 보기**(scr-book): 2쪽 스프레드 폐지 → **한 화면에 일기 하나 크게**(`step()=1`, `#page-right`만). 그날 미디어 2개+면 `pg-cover` 체크박스로 대표 사진 선택.
-- **사진 달력**: `renderCal`이 `coverEntry(date)`(선택값 우선/없으면 첫 미디어)의 thumb로 셀 배경. 영상 thumb=첫 프레임 정지컷. 날짜를 누르면 `selDate` 선택(강조 `.sel`)만 하고 `renderCalEntryList`가 **그 날짜의 일기만** 아래에 표시(목록 항목 클릭 → 크게 보기). `selDate` 기본값=보고 있는 달의 오늘 또는 최근 기록일.
+- **크게 보기 = 달력 아래 통합**: 별도 scr-book 페이지 **제거**. 날짜를 누르면 `renderCalEntryList`가 그 날짜 일기를 **크게보기 카드(`bigEntryHTML`)**로 달력 바로 아래 렌더. 그리드/저장/수정 후 모두 `jumpToEntry`→달력+`scrollIntoView`. `selDate` 기본=오늘/최근일.
+- **인라인 수정**: 카드의 `.be-text`(textarea) focusout 시 text 저장. `.be-editphoto`→`openEditEntry(id)`가 촬영 화면을 **수정 모드**(`editId`)로 열어 사진·필터·스티커·기분·글 교체(`saveEntry`가 editId면 기존 갱신, 새 미디어 없으면 기존 유지). `.cover-chk` 대표사진, `.be-del` 삭제.
+- **사진 꾸미기**: 폴라로이드 프레임 색 `FRAME_COLORS`(블랙 포함)·마스킹 테이프 색 `TAPE_COLORS`. `applyDecoVars()`가 body에 `--frame`/`--tape` CSS 변수 + `.frame-dark`. `.masking-tape`는 사진 위 고정 오버레이. 브이로그 폴라로이드도 `frameC()` 적용.
+- **사진 달력**: `renderCal`이 `coverEntry(date)` thumb로 셀 배경. 영상 thumb=첫 프레임 정지컷.
 - **기분 통계**(`renderMoodStats`): 월별 `MOODS` 분포 막대(버튼→`openMoodCollection` 모아보기)+최다 기분 요약+`MOOD_CARD`(공감/위로/응원). `statsYM` 상태.
 - **대표 사진**: `momentDiary:covers`(date→entryId) localStorage. `setCover`/`coverEntry`/`isCover`.
 - **브이로그 보관함**: IndexedDB `vlogs` 스토어(DB v2). `saveVlogToLib`(생성 후 `#btn-vlog-keep`), `renderVlogLib` 카드(재생=인라인 video/저장/삭제), `VLOG_CAP`개 초과 시 오래된 것 정리.

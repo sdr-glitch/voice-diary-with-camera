@@ -20,7 +20,6 @@ const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 
 let db = null;
 let entries = [];                 // 날짜순 정렬 유지
-let pageIndex = 0;                // 스프레드 왼쪽(모바일은 현재) 페이지 인덱스
 let flipping = false;
 let curScreen = 'scr-cover';      // 현재 화면 id
 let backTo = 'scr-cal';           // 하위 화면(기록·브이로그·설정)에서 돌아갈 곳
@@ -51,9 +50,37 @@ let userAudioData = null; // ArrayBuffer
 let userAudioName = '';
 
 let captureDate = null;   // 기록 중인 날짜(YYYY-MM-DD) — 달력에서 지난 날 채우기 지원
+let editId = null;        // 수정 중인 기록 id (null이면 새 기록)
 let reminderTimer = 0;    // 알림 예약 타이머
 let gridFilterMood = '';  // 모아보기 기분 필터
-let selDate = '';         // 달력에서 선택한 날짜 (아래 목록에 표시)
+let selDate = '';         // 달력에서 선택한 날짜 (아래 크게보기 카드)
+
+/* 사진 꾸미기 — 폴라로이드 프레임 색 / 마스킹 테이프 색 */
+const FRAME_COLORS = [
+  { k: 'ivory', label: '아이보리', c: '#fffdf7' },
+  { k: 'black', label: '블랙', c: '#23211d' },
+  { k: 'kraft', label: '크래프트', c: '#d8c6a4' },
+  { k: 'pink', label: '핑크', c: '#f4d3dd' },
+  { k: 'mint', label: '민트', c: '#cfe8dc' },
+  { k: 'sky', label: '하늘', c: '#d3e2f0' },
+];
+const TAPE_COLORS = [
+  { k: 'cream', label: '크림', c: 'rgba(240,225,190,.72)' },
+  { k: 'peach', label: '복숭아', c: 'rgba(244,190,170,.7)' },
+  { k: 'sky', label: '하늘', c: 'rgba(180,205,230,.68)' },
+  { k: 'sage', label: '세이지', c: 'rgba(178,205,178,.68)' },
+  { k: 'lilac', label: '라일락', c: 'rgba(205,190,225,.68)' },
+  { k: 'gray', label: '그레이', c: 'rgba(180,178,172,.6)' },
+];
+function getFrame() { return localStorage.getItem(LS_PREFIX + 'frame') || 'ivory'; }
+function getTape() { return localStorage.getItem(LS_PREFIX + 'tape') || 'cream'; }
+function frameC() { return (FRAME_COLORS.find((f) => f.k === getFrame()) || FRAME_COLORS[0]).c; }
+function tapeC() { return (TAPE_COLORS.find((t) => t.k === getTape()) || TAPE_COLORS[0]).c; }
+function applyDecoVars() {
+  document.body.style.setProperty('--frame', frameC());
+  document.body.style.setProperty('--tape', tapeC());
+  document.body.classList.toggle('frame-dark', getFrame() === 'black');
+}
 const DEFAULT_OUTRO = '이번 달도 수고했어';
 const APP_NAME = '순간일기';
 
@@ -402,7 +429,7 @@ function sortEntries() {
 }
 
 const TAB_SCREENS = ['scr-cal', 'scr-grid', 'scr-stats', 'scr-vloglib', 'scr-settings'];
-const FAB_SCREENS = ['scr-cal', 'scr-grid', 'scr-book'];
+const FAB_SCREENS = ['scr-cal', 'scr-grid'];
 
 /* ==================== 화면 전환 ==================== */
 function show(id) {
@@ -414,7 +441,6 @@ function show(id) {
   if (id === 'scr-grid') renderGrid();
   if (id === 'scr-stats') renderMoodStats();
   if (id === 'scr-vloglib') renderVlogLib();
-  if (id === 'scr-book') renderSpread();
   if (id === 'scr-vlog') fillVlogMonths();
   if (id === 'scr-settings') renderStats();
   if (id === 'scr-cover') renderCoverCount();
@@ -443,39 +469,6 @@ function mediaURL(e) {
   return mediaURLCache.get(e.id);
 }
 
-function pageHTML(e, num) {
-  if (!e) {
-    return `<button class="pg-empty" id="pg-empty-btn">
-      <span class="pg-empty-plus">＋</span>
-      <p>아직 이 페이지는 비어 있어요.<br>여기를 눌러<br>오늘의 순간을 담아보세요.</p></button>`;
-  }
-  const d = parseDate(e.date);
-  const stk = (e.stickers || []).map((s) =>
-    `<span class="stk" data-s="${s.s}" style="left:${s.x * 100}%;top:${s.y * 100}%">${s.e}</span>`).join('');
-  let media = '';
-  if (e.kind === 'photo' && e.blob) {
-    media = `<div class="pg-media"><img src="${mediaURL(e)}" alt="일기 사진">${stk}<span class="media-tag">${filterLabel(e.filter)}</span></div>`;
-  } else if (e.kind === 'video' && e.blob) {
-    const secs = e.durMs ? Math.max(1, Math.round(e.durMs / 1000)) + '초 ' : '';
-    media = `<div class="pg-media"><video src="${mediaURL(e)}" muted loop autoplay playsinline></video>${stk}<span class="media-tag">영상 ${secs}· ${filterLabel(e.filter)}</span></div>`;
-  }
-  const who = authorTag(e);
-  const meta = [who ? `${who}` : '', e.mood ? `기분 ${moodLabel(e.mood)}` : '', e.weather ? `날씨 ${e.weather}` : '']
-    .filter(Boolean).join('　');
-  // 그날 미디어가 2개 이상이면 대표(썸네일) 사진 선택 체크박스
-  const dayMediaCount = entries.filter((x) => x.date === e.date && x.thumb).length;
-  const coverPick = (e.thumb && dayMediaCount > 1)
-    ? `<label class="pg-cover"><input type="checkbox" class="cover-chk" data-id="${e.id}" data-date="${e.date}" ${isCover(e) ? 'checked' : ''}> 이 날의 대표 사진(달력 썸네일)으로</label>`
-    : '';
-  return `
-    <div class="pg-date">${fmtDateKo(e.date)} <span class="pg-dow">${DOW[d.getDay()]}요일</span></div>
-    ${meta ? `<div class="pg-meta">${meta}</div>` : ''}
-    ${media}
-    ${coverPick}
-    <div class="pg-text">${escapeHTML(e.text || '')}</div>
-    <button class="pg-del" data-id="${e.id}" title="이 기록 지우기" aria-label="이 기록 지우기">지우기</button>
-    <span class="pg-num">${num}</span>`;
-}
 function escapeHTML(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -486,22 +479,40 @@ function filterLabel(f) {
 function moodLabel(m) {
   return { 설렘: '설렘', 행복: '행복', 평온: '평온', 그저그럼: '그저 그럼', 지침: '지침', 울적: '울적', 속상: '속상' }[m] || m;
 }
-
-function step() { return 1; } // 한 화면에 일기 하나씩 크게
-function maxIndex() { return Math.max(0, entries.length - 1); }
-function clampIndex() { pageIndex = Math.min(Math.max(0, pageIndex), maxIndex()); }
-
-function renderSpread() {
-  clampIndex();
-  $('#page-right').innerHTML = pageHTML(entries[pageIndex], pageIndex + 1);
-  sizePageStickers();
-  const total = Math.max(entries.length, 1);
-  $('#pg-indicator').textContent = `${Math.min(pageIndex + 1, total)} / ${total}`;
-  $('#btn-prev').disabled = pageIndex <= 0;
-  $('#btn-next').disabled = pageIndex >= maxIndex();
+function stickersHTMLFor(e) {
+  return (e.stickers || []).map((s) =>
+    `<span class="stk" data-s="${s.s}" style="left:${s.x * 100}%;top:${s.y * 100}%">${s.e}</span>`).join('');
 }
-
-/** 페이지 스티커 크기를 컨테이너 폭 기준으로 계산 (CSS만으론 컨테이너 비례 폰트가 안 됨) */
+/** 사진·영상 블록 (폴라로이드 프레임 + 마스킹 테이프) */
+function mediaBlockHTML(e) {
+  if (e.kind === 'photo' && e.blob) {
+    return `<div class="pg-media polaroid"><span class="masking-tape"></span><img src="${mediaURL(e)}" alt="일기 사진">${stickersHTMLFor(e)}<span class="media-tag">${filterLabel(e.filter)}</span></div>`;
+  }
+  if (e.kind === 'video' && e.blob) {
+    const secs = e.durMs ? Math.max(1, Math.round(e.durMs / 1000)) + '초 ' : '';
+    return `<div class="pg-media polaroid"><span class="masking-tape"></span><video src="${mediaURL(e)}" muted loop autoplay playsinline></video>${stickersHTMLFor(e)}<span class="media-tag">영상 ${secs}· ${filterLabel(e.filter)}</span></div>`;
+  }
+  return '';
+}
+/** 달력 아래 크게보기 카드 (사진·글 바로 수정) */
+function bigEntryHTML(e) {
+  const who = authorTag(e);
+  const meta = [who, e.mood ? `기분 ${moodLabel(e.mood)}` : '', e.weather ? `날씨 ${e.weather}` : '']
+    .filter(Boolean).join('　');
+  const dayMediaCount = entries.filter((x) => x.date === e.date && x.thumb).length;
+  const coverPick = (e.thumb && dayMediaCount > 1)
+    ? `<label class="pg-cover"><input type="checkbox" class="cover-chk" data-id="${e.id}" data-date="${e.date}" ${isCover(e) ? 'checked' : ''}> 이 날의 대표 사진(달력 썸네일)으로</label>`
+    : '';
+  return `<article class="big-entry" id="big-${e.id}" data-id="${e.id}">
+    ${meta ? `<div class="pg-meta">${meta}</div>` : ''}
+    ${mediaBlockHTML(e)}
+    ${e.thumb ? `<button class="tbtn be-editphoto" data-id="${e.id}">사진 바꾸기</button>` : ''}
+    ${coverPick}
+    <textarea class="be-text" data-id="${e.id}" rows="3" placeholder="메모를 입력하세요…">${escapeHTML(e.text || '')}</textarea>
+    <div class="be-actions"><button class="tbtn danger be-del" data-id="${e.id}">이 기록 지우기</button></div>
+  </article>`;
+}
+/** 스티커 크기를 컨테이너 폭 기준으로 계산 */
 function sizePageStickers() {
   $$('.pg-media').forEach((box) => {
     const w = box.clientWidth || 300;
@@ -509,17 +520,6 @@ function sizePageStickers() {
       el.style.fontSize = Math.round(parseFloat(el.dataset.s || 0.15) * w) + 'px';
     });
   });
-}
-
-/** 페이지 이동 — 넘김 모션은 없애고, 실제 종이 넘어가는 소리만 재생 */
-function flip(dir) {
-  const st = step();
-  const target = pageIndex + dir * st;
-  if (target < 0 || target > maxIndex()) return Promise.resolve(false);
-  pageIndex = target;
-  playFx('flip');
-  renderSpread();
-  return Promise.resolve(true);
 }
 
 /* ==================== 카메라 · 필터 ==================== */
@@ -698,19 +698,41 @@ function camMsg(text, show = true) {
   if (text) $('#cam-msg-text').innerHTML = text;
 }
 
-/** 특정 날짜의 기록 화면 열기 (달력에서 지난 날 채우기) */
+/** 특정 날짜의 새 기록 화면 열기 */
 function openCaptureFor(date) {
+  editId = null;
   captureDate = date || todayStr();
+  openSub('scr-capture');
+}
+/** 기존 기록 수정 (사진·글 바꾸기) */
+function openEditEntry(id) {
+  const e = entries.find((x) => x.id === id);
+  if (!e) return;
+  editId = id;
+  captureDate = e.date;
   openSub('scr-capture');
 }
 function renderCaptureDate() {
   const d = captureDate || todayStr();
   const isToday = d === todayStr();
-  $('#cap-title').textContent = isToday ? '오늘의 순간 담기' : '그날의 순간 채우기';
+  $('#cap-title').textContent = editId ? '기록 수정' : (isToday ? '오늘의 순간 담기' : '그날의 순간 채우기');
   const wd = DOW[parseDate(d).getDay()];
-  $('#cap-datebar').textContent = isToday
+  $('#cap-datebar').textContent = isToday && !editId
     ? `오늘 · ${fmtDateKo(d)} ${wd}요일`
-    : `${fmtDateKo(d)} ${wd}요일의 기록을 채우는 중`;
+    : `${fmtDateKo(d)} ${wd}요일`;
+}
+/** 수정 모드: 기존 값 채우기 */
+function prefillEdit() {
+  const banner = $('#cap-edit-banner');
+  const e = editId ? entries.find((x) => x.id === editId) : null;
+  if (!e) { banner.classList.add('hidden'); return; }
+  banner.classList.remove('hidden');
+  $('#diary-text').value = e.text || '';
+  if (e.mood) { const b = $(`.mchip[data-mood="${e.mood}"]`); if (b) b.classList.add('on'); }
+  if (e.weather) { const b = $(`.wchip[data-weather="${e.weather}"]`); if (b) b.classList.add('on'); }
+  camFilter = e.filter || 'vintage';
+  $$('#filter-row .chip').forEach((x) => x.classList.toggle('on', x.dataset.filter === camFilter));
+  if (e.author) { activeAuthor = e.author; renderAuthorChips(); }
 }
 
 async function openCapture() {
@@ -718,6 +740,7 @@ async function openCapture() {
   resetCaptureUI();
   renderCaptureDate();
   renderAuthorChips();
+  prefillEdit();
   camMsg('카메라를 준비하고 있어요…');
   try {
     camStream = await navigator.mediaDevices.getUserMedia({
@@ -1048,13 +1071,39 @@ function toggleSpeech() { speechOn ? stopSpeech() : startSpeech(); }
 async function saveEntry() {
   const text = $('#diary-text').value.trim();
   const hasMedia = captured && captured.blob;
+  if (recording) { toast('녹화를 먼저 멈춰주세요. 셔터 버튼을 한 번 더 누르면 멈춰요.'); return null; }
+  const weatherBtn = $('.wchip.on');
+  const moodBtn = $('.mchip.on');
+
+  // 수정 모드 — 기존 기록 갱신 (미디어는 새로 찍었을 때만 교체)
+  if (editId) {
+    const e = entries.find((x) => x.id === editId);
+    if (e) {
+      if (hasMedia) {
+        const u = mediaURLCache.get(e.id); if (u) { URL.revokeObjectURL(u); mediaURLCache.delete(e.id); }
+        e.kind = captured.kind; e.blob = captured.blob; e.thumb = captured.thumb;
+        e.filter = captured.filter; e.durMs = captured.durMs || 0; e.stickers = capStickers.slice();
+      }
+      e.text = text;
+      e.weather = weatherBtn ? weatherBtn.dataset.weather : '';
+      e.mood = moodBtn ? moodBtn.dataset.mood : '';
+      e.author = activeAuthor || e.author || '';
+      await dbPut(e);
+      const eDate = e.date, eId = e.id;
+      editId = null;
+      toast('기록을 수정했어요.');
+      selDate = eDate; calYM = eDate.slice(0, 7);
+      show('scr-cal');
+      setTimeout(() => { const el = $(`#big-${eId}`); if (el) el.scrollIntoView({ block: 'center' }); }, 60);
+      return e;
+    }
+    editId = null;
+  }
+
   if (!hasMedia && !text) {
     toast('사진·영상을 찍거나, 한 줄이라도 느낌을 남겨보세요.');
     return null;
   }
-  if (recording) { toast('녹화를 먼저 멈춰주세요. 셔터 버튼을 한 번 더 누르면 멈춰요.'); return null; }
-  const weatherBtn = $('.wchip.on');
-  const moodBtn = $('.mchip.on');
   const entry = {
     id: uid(),
     date: captureDate || todayStr(),
@@ -1073,9 +1122,10 @@ async function saveEntry() {
   await dbPut(entry);
   entries.push(entry);
   sortEntries();
-  pageIndex = entries.indexOf(entry);   // 저장한 일기를 크게 보기로
   toast('일기장에 붙였어요.');
-  show('scr-book');
+  selDate = entry.date; calYM = entry.date.slice(0, 7);
+  show('scr-cal');
+  setTimeout(() => { const el = $(`#big-${entry.id}`); if (el) el.scrollIntoView({ block: 'center' }); }, 60);
   return entry;
 }
 
@@ -1085,9 +1135,9 @@ async function removeEntry(id) {
   const url = mediaURLCache.get(id);
   if (url) { URL.revokeObjectURL(url); mediaURLCache.delete(id); }
   entries = entries.filter((e) => e.id !== id);
-  clampIndex();
-  renderSpread();
   renderCoverCount();
+  if (curScreen === 'scr-cal') renderCal();
+  else if (curScreen === 'scr-grid') renderGrid();
 }
 async function deleteEntryUI(id) {
   const e = entries.find((x) => x.id === id);
@@ -1188,7 +1238,7 @@ function drawPolaroidFrame(ctx, W, H, g) {
   ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
   ctx.save();
   ctx.shadowColor = 'rgba(60,45,25,.32)'; ctx.shadowBlur = 26; ctx.shadowOffsetY = 12;
-  ctx.fillStyle = '#fffdf7';
+  ctx.fillStyle = frameC();   // 사용자 프레임 색
   roundRect(ctx, g.fx, g.fy, g.fw, g.fh, 10); ctx.fill();
   ctx.restore();
   ctx.fillStyle = '#d8d0c0';
@@ -1214,14 +1264,15 @@ function polaroidStickers(ctx, g, e) {
   });
 }
 function polaroidCaption(ctx, g, e) {
+  const dark = getFrame() === 'black';   // 검은 프레임이면 밝은 글씨
   const cy = g.my + g.mh + 40;
-  ctx.fillStyle = '#4a4238'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = dark ? '#f2ede2' : '#4a4238'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.font = '600 24px "Noto Serif KR", serif';
   ctx.fillText(`${fmtDateKo(e.date)} ${e.weather || ''}`, g.fx + g.fw / 2, cy);
   const extra = [e.mood ? moodLabel(e.mood) : '', (e.text || '').replace(/\s+/g, ' ').trim()]
     .filter(Boolean).join(' · ');
   if (extra) {
-    ctx.font = '17px "Noto Serif KR", serif'; ctx.fillStyle = '#8a8071';
+    ctx.font = '17px "Noto Serif KR", serif'; ctx.fillStyle = dark ? 'rgba(242,237,226,.75)' : '#8a8071';
     let line = extra; if (line.length > 24) line = line.slice(0, 24) + '…';
     ctx.fillText(line, g.fx + g.fw / 2, cy + 26);
   }
@@ -1831,42 +1882,39 @@ function renderCal() {
   renderCalEntryList();
 }
 
-/** 달력 아래 — 선택한 날짜의 일기만 (누르면 크게 보기) */
+/** 달력 아래 — 선택한 날짜의 일기를 크게 보고 바로 수정 */
 function renderCalEntryList() {
   const wrap = $('#cal-entry-list');
   if (!selDate) { wrap.innerHTML = '<p class="empty-note sm">날짜를 눌러 그날의 일기를 보세요.</p>'; return; }
-  const list = entries.map((e, i) => ({ e, i }))
-    .filter(({ e }) => e.date === selDate)
-    .sort((a, b) => b.e.ts - a.e.ts);
+  const list = entries.filter((e) => e.date === selDate).sort((a, b) => b.ts - a.ts);
   const d = parseDate(selDate);
   const head = `<p class="entry-list-head">${d.getMonth() + 1}월 ${d.getDate()}일 ${DOW[d.getDay()]}요일 · ${list.length}개</p>`;
   if (!list.length) {
-    wrap.innerHTML = head + '<p class="empty-note sm">이 날엔 아직 기록이 없어요. 날짜를 눌러 채워보세요.</p>';
+    wrap.innerHTML = head + `<div class="be-empty"><p class="empty-note sm">이 날엔 아직 기록이 없어요.</p><button class="tbtn primary" id="be-add">이 날 채우기</button></div>`;
     return;
   }
-  wrap.innerHTML = head + list.map(({ e, i }) => {
-    const d = parseDate(e.date);
-    const thumb = e.thumb
-      ? `<img src="${e.thumb}" alt="">${e.kind === 'video' ? '<span class="li-vtag">▶</span>' : ''}`
-      : '<span class="li-noimg">글</span>';
-    const snippet = escapeHTML((e.text || '').replace(/\s+/g, ' ').trim().slice(0, 40)) || (e.mood ? moodLabel(e.mood) : '기록');
-    return `<button class="entry-li" data-idx="${i}">
-      <span class="li-thumb">${thumb}</span>
-      <span class="li-body">
-        <span class="li-date">${d.getMonth() + 1}월 ${d.getDate()}일 ${DOW[d.getDay()]}요일 ${authorTag(e) ? `· ${escapeHTML(authorTag(e))}` : ''} ${e.mood ? `· ${moodLabel(e.mood)}` : ''} ${e.weather || ''}</span>
-        <span class="li-text">${snippet}</span>
-      </span>
-    </button>`;
-  }).join('');
+  wrap.innerHTML = head + list.map(bigEntryHTML).join('');
+  sizePageStickers();
 }
+/** 특정 기록으로 이동 = 달력에서 그 날짜를 열고 카드로 스크롤 */
 function jumpToEntry(idx) {
-  pageIndex = idx;
-  backTo = TAB_SCREENS.includes(curScreen) ? curScreen : 'scr-cal';
+  const e = entries[idx];
+  if (!e) return;
+  selDate = e.date;
+  calYM = e.date.slice(0, 7);
   playFx('flip');
-  show('scr-book');
+  show('scr-cal');
+  setTimeout(() => { const el = $(`#big-${e.id}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 60);
 }
 
 /* ==================== 설정 ==================== */
+function renderDecoChips() {
+  const fc = getFrame(), tc = getTape();
+  $('#frame-chips').innerHTML = FRAME_COLORS.map((f) =>
+    `<button class="chip swatch ${f.k === fc ? 'on' : ''}" data-frame="${f.k}"><span class="sw-dot" style="background:${f.c};border:1px solid rgba(0,0,0,.15)"></span>${f.label}</button>`).join('');
+  $('#tape-chips').innerHTML = TAPE_COLORS.map((t) =>
+    `<button class="chip swatch ${t.k === tc ? 'on' : ''}" data-tape="${t.k}"><span class="sw-dot" style="background:${t.c}"></span>${t.label}</button>`).join('');
+}
 function renderStats() {
   const photos = entries.filter((e) => e.kind === 'photo').length;
   const clips = entries.filter((e) => e.kind === 'video').length;
@@ -1874,6 +1922,7 @@ function renderStats() {
     `지금까지 순간 ${entries.length}개 (사진 ${photos} · 영상 ${clips} · 글 ${entries.length - photos - clips})`;
   renderTopicChips();
   renderMembers();
+  renderDecoChips();
 }
 async function wipeAll() {
   const ok = await confirmModal('정말 모든 기록을 지울까요? 사진·영상·글이 전부 사라지고 되돌릴 수 없어요.');
@@ -1888,7 +1937,7 @@ async function wipeAll() {
   vlogURLCache.clear();
   entries = [];
   vlogs = [];
-  pageIndex = 0;
+
   await initDB();
   toast('모든 기록을 지웠어요. 새 마음으로 시작해요.');
   show('scr-cover');
@@ -2046,7 +2095,6 @@ function bind() {
   // 표지 → 달력(홈), 제목 클릭 → 표지
   $('#btn-open-book').onclick = () => goCalendar(todayStr().slice(0, 7));
   $('#cal-home-title').onclick = () => show('scr-cover');
-  $('#book-home-title').onclick = () => show('scr-cover');
 
   // 하단 탭 (모아보기 탭은 기분 필터 해제하고 전체)
   $$('#bottomnav .navbtn').forEach((b) => {
@@ -2069,10 +2117,29 @@ function bind() {
       openCaptureFor(day.dataset.date); // 빈 날 → 그날 채우기
     }
   });
-  // 달력 아래 (선택 날짜) 일기 목록 → 크게 보기
+  // 달력 아래 (선택 날짜) 크게보기 카드 — 사진/글 수정·대표선택·삭제
   $('#cal-entry-list').addEventListener('click', (e) => {
-    const li = e.target.closest('.entry-li');
-    if (li) jumpToEntry(Number(li.dataset.idx));
+    const editp = e.target.closest('.be-editphoto');
+    const del = e.target.closest('.be-del');
+    const add = e.target.closest('#be-add');
+    if (editp) openEditEntry(editp.dataset.id);
+    else if (del) deleteEntryUI(del.dataset.id);
+    else if (add) openCaptureFor(selDate);
+  });
+  $('#cal-entry-list').addEventListener('change', (e) => {
+    const chk = e.target.closest('.cover-chk');
+    if (chk) {
+      if (chk.checked) { setCover(chk.dataset.date, chk.dataset.id); toast('이 사진을 달력 대표로 정했어요.'); }
+      else { const m = loadCovers(); delete m[chk.dataset.date]; saveCovers(m); }
+      renderCal();
+    }
+  });
+  // 메모 즉시 수정 (칸을 벗어나면 저장)
+  $('#cal-entry-list').addEventListener('focusout', (e) => {
+    const ta = e.target.closest('.be-text');
+    if (!ta) return;
+    const en = entries.find((x) => x.id === ta.dataset.id);
+    if (en && en.text !== ta.value) { en.text = ta.value; dbPut(en); }
   });
 
   // 기분 통계 — 월 이동 + 기분 눌러 모아보기
@@ -2099,33 +2166,9 @@ function bind() {
     else if (del) deleteVlog(del.dataset.id);
   });
 
-  // 책·하위 화면 돌아가기
-  $('#btn-book-back').onclick = () => show(backTo);
-  $('#btn-cap-back').onclick = () => show(backTo);
+  // 하위 화면 돌아가기 (수정 취소 포함)
+  $('#btn-cap-back').onclick = () => { editId = null; $('#cap-edit-banner').classList.add('hidden'); show(backTo); };
   $('#btn-vlog-back').onclick = () => show(backTo);
-
-  // 책: 개별 삭제 / 빈 페이지 클릭 → 기록하기
-  $('#book').addEventListener('click', (e) => {
-    const del = e.target.closest('.pg-del');
-    if (del) { deleteEntryUI(del.dataset.id); return; }
-    if (e.target.closest('.pg-empty')) openCaptureFor(todayStr());
-  });
-  // 대표(썸네일) 사진 선택
-  $('#book').addEventListener('change', (e) => {
-    const chk = e.target.closest('.cover-chk');
-    if (!chk) return;
-    if (chk.checked) { setCover(chk.dataset.date, chk.dataset.id); toast('이 사진을 달력 대표로 정했어요.'); }
-    else { const m = loadCovers(); delete m[chk.dataset.date]; saveCovers(m); }
-    renderSpread();
-  });
-
-  $('#btn-prev').onclick = () => flip(-1);
-  $('#btn-next').onclick = () => flip(1);
-  document.addEventListener('keydown', (e) => {
-    if ($('#scr-book').classList.contains('hidden')) return;
-    if (e.key === 'ArrowLeft') flip(-1);
-    if (e.key === 'ArrowRight') flip(1);
-  });
 
   // 필터 / 촬영 모드 / 날씨 / 기분
   $$('#filter-row .chip').forEach((b) => {
@@ -2210,6 +2253,18 @@ function bind() {
   };
   $('#btn-add-topic').onclick = addTopicUI;
   $('#custom-topic-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') addTopicUI(); });
+
+  // 설정: 사진 꾸미기 (프레임/테이프 색)
+  $('#frame-chips').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-frame]'); if (!b) return;
+    localStorage.setItem(LS_PREFIX + 'frame', b.dataset.frame);
+    applyDecoVars(); renderDecoChips();
+  });
+  $('#tape-chips').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tape]'); if (!b) return;
+    localStorage.setItem(LS_PREFIX + 'tape', b.dataset.tape);
+    applyDecoVars(); renderDecoChips();
+  });
   // 설정: 함께 쓰기(멤버)
   $('#btn-add-member').onclick = () => { addMember($('#member-name').value); $('#member-name').value = ''; };
   $('#member-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { addMember($('#member-name').value); $('#member-name').value = ''; } });
@@ -2331,10 +2386,7 @@ function bind() {
   const savedOutro = localStorage.getItem(LS_PREFIX + 'outro');
   $('#vlog-outro').value = savedOutro === null ? DEFAULT_OUTRO : savedOutro;
 
-  window.addEventListener('resize', () => {
-    if (!$('#scr-book').classList.contains('hidden')) renderSpread();
-    else sizePageStickers();
-  });
+  window.addEventListener('resize', () => { sizePageStickers(); });
 }
 
 /* ==================== 초기화 ==================== */
@@ -2344,7 +2396,7 @@ async function init() {
   entries = await dbAll();
   sortEntries();
   await loadVlogs();
-  pageIndex = maxIndex();
+  applyDecoVars();
   renderCoverCount();
   maybeOnboard();
   scheduleReminder();
@@ -2359,11 +2411,14 @@ const readyPromise = init();
 window.__diary = {
   ready: () => readyPromise,
   getEntries: () => entries.map((e) => ({ ...e, blobSize: e.blob ? e.blob.size : 0 })),
-  getPageIndex: () => pageIndex,
   show,
-  flip,
   saveEntry,
   deleteEntry: removeEntry, // 테스트용 — UI 확인 모달 없이 즉시 삭제
+  openEditEntry,
+  getFrame, getTape,
+  setFrame: (k) => { localStorage.setItem(LS_PREFIX + 'frame', k); applyDecoVars(); },
+  setTape: (k) => { localStorage.setItem(LS_PREFIX + 'tape', k); applyDecoVars(); },
+  editText: async (id, text) => { const e = entries.find((x) => x.id === id); if (e) { e.text = text; await dbPut(e); } },
 
   buildVlog,
   speechSupported,

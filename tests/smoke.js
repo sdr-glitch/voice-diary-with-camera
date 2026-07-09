@@ -45,8 +45,8 @@ function ok(cond, name) {
   await page.click('#btn-open-book');
   ok(await page.isVisible('#scr-cal'), '표지 누르면 달력 화면으로');
   ok((await page.textContent('#cal-title')).includes('년'), '달력 제목(연월) 표시');
-  const calText = await page.textContent('.book-top');
-  ok(noEmoji(calText) && !calText.includes('표지로'), '상단 버튼에 이모티콘·표지로 없음');
+  const calText = await page.textContent('#scr-cal .top-bar');
+  ok(noEmoji(calText) && !calText.includes('표지로'), '상단에 이모티콘·표지로 없음');
 
   console.log('\n[3] 제목 클릭 → 표지로 이동');
   await page.click('#cal-home-title');
@@ -77,11 +77,10 @@ function ok(cond, name) {
   // 필터끼리 서로 다름(겹치지 않음)
   ok(diff(f.vintage.q1, f.film.q1) > 8 && diff(f.vintage.q1, f.mono.q1) > 8, '빈티지·필름·흑백이 서로 다름');
 
-  console.log('\n[6] 빈 페이지 클릭 → 기록 화면 (책에 기록이 없을 때)');
-  await page.evaluate(() => window.__diary.show('scr-book'));
-  ok(await page.$('.pg-empty') !== null, '빈 페이지 안내 표시');
-  await page.click('.pg-empty');
-  ok(await page.isVisible('#scr-capture'), '빈 페이지 누르면 기록 화면으로');
+  console.log('\n[6] 빈 날 클릭 → 기록 화면');
+  await page.evaluate(() => window.__diary.goCalendar('2026-07'));
+  await page.click('.cal-day.empty[data-date="2026-07-01"]');
+  ok(await page.isVisible('#scr-capture'), '빈 날 누르면 기록 화면으로');
   await page.click('#btn-cap-back');
 
   console.log('\n[7] 사진 촬영 + 기분/날씨 + 저장 (기본은 영상 → 사진으로 전환)');
@@ -96,11 +95,12 @@ function ok(cond, name) {
   await page.click('.mchip[data-mood="행복"]');
   await page.click('.wchip[data-weather="☀️"]');
   await page.click('#btn-save-entry');
-  await page.waitForSelector('#scr-book:not(.hidden)');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
   let list = await page.evaluate(() => window.__diary.getEntries());
   ok(list.length === 1 && list[0].kind === 'photo', '사진 저장');
   ok(list[0].mood === '행복' && list[0].weather === '☀️', '기분·날씨 메타 저장');
-  ok((await page.textContent('#page-right, #page-left')).includes('기분'), '페이지에 기분 표시');
+  ok((await page.textContent('#cal-entry-list')).includes('기분'), '달력 아래 크게보기에 기분 표시');
+  ok(await page.$('#cal-entry-list .big-entry .pg-media.polaroid') !== null, '폴라로이드 프레임으로 크게 표시');
 
   console.log('\n[8] 영상 — 길이 제한 없이 토글 녹화 (시작→대기→정지)');
   await page.evaluate(() => window.__diary.show('scr-capture'));
@@ -117,7 +117,7 @@ function ok(cond, name) {
   ok(/\d+초/.test(recShown), `녹화 시간 표시 (${recShown})`);
   await page.fill('#diary-text', '길이 제한 없는 영상.');
   await page.click('#btn-save-entry');
-  await page.waitForSelector('#scr-book:not(.hidden)');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
   list = await page.evaluate(() => window.__diary.getEntries());
   const vid = list.find((e) => e.kind === 'video');
   ok(!!vid && vid.blobSize > 1000, `영상 저장 (blob ${vid ? vid.blobSize : 0}B)`);
@@ -131,7 +131,7 @@ function ok(cond, name) {
   ok((await page.textContent('#voice-status')).length > 0, '음성 상태 안내 표시');
   await page.fill('#diary-text', '직접 입력도 잘 된다.');
   await page.click('#btn-save-entry');
-  await page.waitForSelector('#scr-book:not(.hidden)');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
   list = await page.evaluate(() => window.__diary.getEntries());
   ok(list.some((e) => e.kind === 'none' && e.text.includes('직접 입력')), '글만 있는 일기 저장');
 
@@ -154,7 +154,7 @@ function ok(cond, name) {
   ok(stks.length === 1 && stks[0].x < 0.35, `스티커 부착 후 드래그 이동 (x=${stks[0].x.toFixed(2)})`);
   await page.fill('#diary-text', '스티커로 꾸민 날');
   await page.click('#btn-save-entry');
-  await page.waitForSelector('#scr-book:not(.hidden)');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
   const saved = (await page.evaluate(() => window.__diary.getEntries())).find((e) => e.text.includes('스티커로 꾸민'));
   ok(saved && saved.stickers.length === 1, '스티커가 일기와 함께 저장');
 
@@ -171,11 +171,9 @@ function ok(cond, name) {
   // 날짜를 누르면 아래에 그날 일기만 뜨고, 목록을 눌러 크게 보기
   await page.click('.cal-day.has[data-date="2026-06-03"]');
   await page.waitForTimeout(120);
-  ok((await page.textContent('#cal-entry-list')).includes('유월 첫 기록'), '선택한 날짜(6/3) 일기만 목록에 표시');
-  ok(!(await page.textContent('#cal-entry-list')).includes('유월 셋째'), '다른 날짜 일기는 목록에 없음');
-  await page.click('#cal-entry-list .entry-li');
-  await page.waitForSelector('#scr-book:not(.hidden)');
-  ok((await page.textContent('#page-right')).includes('유월 첫 기록'), '목록 클릭 → 그 일기 크게 보기');
+  ok((await page.textContent('#cal-entry-list')).includes('유월 첫 기록'), '선택한 날짜(6/3) 일기만 크게보기에 표시');
+  ok(!(await page.textContent('#cal-entry-list')).includes('유월 셋째'), '다른 날짜 일기는 없음');
+  ok(await page.$('#cal-entry-list .big-entry .be-text') !== null, '크게보기 카드에 수정 가능한 글칸(be-text)');
   await page.evaluate(() => window.__diary.goCalendar('2026-06'));
   await page.click('#cal-next');
   ok((await page.textContent('#cal-title')).includes('2026년 7월'), '달력 월 넘김');
@@ -269,7 +267,7 @@ function ok(cond, name) {
   await page.fill('#diary-text', '오월의 지난 날을 채웠다.');
   await page.click('.mchip[data-mood="평온"]');
   await page.click('#btn-save-entry');
-  await page.waitForSelector('#scr-book:not(.hidden)');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
   let filled = (await page.evaluate(() => window.__diary.getEntries())).find((e) => e.text.includes('오월의 지난 날'));
   ok(filled && filled.date === '2026-05-10', `지난 날짜(${filled ? filled.date : '?'})로 저장됨`);
 
@@ -283,7 +281,7 @@ function ok(cond, name) {
   await page.waitForFunction(() => window.__diary.camState().captured === 'photo', null, { timeout: 5000 });
   ok(await page.isVisible('#cap-preview-img'), '갤러리 사진 미리보기 표시');
   await page.click('#btn-save-entry');
-  await page.waitForSelector('#scr-book:not(.hidden)');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
   const gal = (await page.evaluate(() => window.__diary.getEntries())).find((e) => e.date === '2026-05-11');
   ok(gal && gal.kind === 'photo' && gal.blobSize > 100, '갤러리 사진이 그날에 저장');
 
@@ -294,19 +292,10 @@ function ok(cond, name) {
   ok(await page.evaluate(() => window.__diary.fxSample('mic')) > 0.0005, '마이크 버튼음 실제 소리');
   ok(await page.evaluate(() => window.__diary.fxSample('flip')) > 0.0005, '종이 넘김 소리 실제 소리');
 
-  console.log('\n[19] 음량 설정 저장 + 페이지 넘김 모션 제거 확인');
+  console.log('\n[19] 음량 설정 저장');
   await page.evaluate(() => window.__diary.show('scr-settings'));
   await page.evaluate(() => { const v = document.querySelector('#set-volume'); v.value = 30; v.dispatchEvent(new Event('change')); });
   ok(await page.evaluate(() => localStorage.getItem('momentDiary:volume')) === '30', '효과음 음량 저장');
-  await page.evaluate(() => window.__diary.show('scr-book'));
-  const pageOK = await page.evaluate(async () => {
-    const before = window.__diary.getPageIndex();
-    await window.__diary.flip(1);
-    // 넘김 애니메이션 클래스가 남지 않아야 함(모션 제거)
-    const animating = document.querySelector('.page.flip-out, .page.flip-in') !== null;
-    return { moved: window.__diary.getPageIndex() !== before || before === 0, animating };
-  });
-  ok(!pageOK.animating, '페이지 넘김 애니메이션 없음(모션 제거)');
 
   console.log('\n[20] 브이로그 마무리 한마디(수정·저장) + 폴라로이드/압축 빌드');
   await page.evaluate(() => window.__diary.show('scr-vlog'));
@@ -371,11 +360,13 @@ function ok(cond, name) {
   await page.click('#bottomnav .navbtn[data-scr="scr-grid"]');
   await page.waitForTimeout(100);
   ok(await page.evaluate(() => window.__diary.gridCount()) >= 3, `그리드에 기록 표시 (${await page.evaluate(() => window.__diary.gridCount())}개)`);
-  // 그리드 아이템 탭 → 책으로
+  // 그리드 아이템 탭 → 달력의 그 날짜 크게보기로
   await page.click('#grid-wrap .grid-item');
-  ok(await page.isVisible('#scr-book'), '그리드 아이템 누르면 책으로');
-  await page.click('#btn-book-back');
-  ok(await page.isVisible('#scr-grid'), '책에서 돌아가기→모아보기');
+  await page.waitForTimeout(120);
+  ok(await page.isVisible('#scr-cal'), '그리드 아이템 누르면 달력 크게보기로');
+  ok((await page.$$eval('#cal-entry-list .big-entry', (n) => n.length)) > 0, '해당 날짜 크게보기 카드 표시');
+  await page.click('#bottomnav .navbtn[data-scr="scr-grid"]');
+  ok(await page.isVisible('#scr-grid'), '다시 모아보기 탭');
   // 롱프레스 흔들림 토글 (훅)
   await page.evaluate(() => window.__diary.setJiggle(true));
   ok(await page.evaluate(() => window.__diary.isJiggling()), '흔들림(편집) 모드 켜짐');
@@ -443,15 +434,25 @@ function ok(cond, name) {
   });
   ok(coverBg.includes('rgb(255, 255, 255)'), `표지가 흰색 계열 (${coverBg.slice(0, 60)}…)`);
 
-  console.log('\n[27] 달력 아래 일기 목록 → 크게 보기');
+  console.log('\n[27] 달력 아래 크게보기 통합 + 사진/글 인라인 수정');
   await page.evaluate(() => window.__diary.goCalendar('2026-07'));
   await page.waitForTimeout(120);
-  ok((await page.$$eval('#cal-entry-list .entry-li', (n) => n.length)) > 0, '달력 아래 일기 목록 표시');
-  await page.click('#cal-entry-list .entry-li');
-  ok(await page.isVisible('#scr-book'), '목록 클릭 → 크게 보기 화면');
-  ok((await page.$$eval('#book .page', (n) => n.length)) === 1, '한 화면에 일기 하나(크게)');
-  await page.click('#btn-book-back');
-  ok(await page.isVisible('#scr-cal'), '돌아가기 → 달력');
+  // 선택 날짜의 크게보기 카드가 달력 아래에 바로 뜸 (별도 페이지 없음)
+  ok(await page.$('#scr-book') === null, '별도 크게보기 페이지(scr-book) 제거됨');
+  const selD = await page.evaluate(() => window.__diary.getSelDate());
+  ok((await page.$$eval('#cal-entry-list .big-entry', (n) => n.length)) > 0, '달력 아래 크게보기 카드 표시');
+  // 글씨 인라인 수정 → 저장(포커스아웃)
+  const firstId = await page.evaluate(() => document.querySelector('#cal-entry-list .be-text').dataset.id);
+  await page.fill(`#cal-entry-list .be-text[data-id="${firstId}"]`, '인라인으로 고친 메모');
+  await page.click('#cal-title'); // 포커스 아웃
+  await page.waitForTimeout(120);
+  ok((await page.evaluate((id) => window.__diary.getEntries().find((e) => e.id === id).text, firstId)) === '인라인으로 고친 메모', '글씨 인라인 수정 저장');
+  // 사진 바꾸기 → 수정 모드 진입
+  if (await page.$(`#cal-entry-list .big-entry[data-id="${firstId}"] .be-editphoto`)) {
+    await page.click(`#cal-entry-list .big-entry[data-id="${firstId}"] .be-editphoto`);
+    ok(await page.isVisible('#scr-capture') && await page.isVisible('#cap-edit-banner'), '사진 바꾸기 → 수정 모드(카메라)');
+    await page.click('#btn-cap-back');
+  } else { ok(true, '(대표사진 없는 카드는 사진 바꾸기 생략)'); }
 
   console.log('\n[28] 사진 달력 + 하루 여러 장 중 대표 썸네일 선택');
   // 같은 날에 사진 2장 시드 (대표 선택은 id 기준)
@@ -551,10 +552,10 @@ function ok(cond, name) {
   await page.evaluate((id) => window.__diary.setActiveAuthor(id), jiId);
   await page.fill('#diary-text', '지영이가 쓴 기록');
   await page.click('#btn-save-entry');
-  await page.waitForSelector('#scr-book:not(.hidden)');
+  await page.waitForSelector('#scr-cal:not(.hidden)');
   const je = (await page.evaluate(() => window.__diary.getEntries())).find((e) => e.text === '지영이가 쓴 기록');
   ok(je && je.author === jiId, '기록에 작성자 저장');
-  ok((await page.textContent('#page-right')).includes('지영'), '크게 보기에 작성자 표시');
+  ok((await page.textContent('#cal-entry-list')).includes('지영'), '달력 크게보기에 작성자 표시');
 
   console.log('\n[33] 교환일기 (내보내기 → 새 기기처럼 가져와 합치기)');
   const exported = await page.evaluate(() => window.__diary.exportData());
@@ -573,6 +574,26 @@ function ok(cond, name) {
   // 다시 가져오면 중복 없음
   const addedN2 = await page.evaluate((data) => window.__diary.importData(data), exported);
   ok(addedN2 === 0, '같은 파일 다시 가져와도 중복 안 생김');
+
+  console.log('\n[33b] 사진 꾸미기 — 폴라로이드 프레임 색(블랙) + 마스킹 테이프 색');
+  await page.evaluate(() => window.__diary.show('scr-settings'));
+  ok((await page.$$eval('#frame-chips .swatch', (n) => n.length)) >= 2, '프레임 색 선택지 표시(블랙 포함)');
+  await page.click('#frame-chips [data-frame="black"]');
+  ok(await page.evaluate(() => window.__diary.getFrame()) === 'black', '프레임 색 블랙으로 설정');
+  ok(await page.evaluate(() => document.body.classList.contains('frame-dark')), '블랙 프레임 적용(frame-dark)');
+  const frameVar = await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--frame').trim());
+  ok(frameVar && frameVar !== '#fffdf7', `프레임 CSS 변수 반영 (${frameVar})`);
+  await page.click('#tape-chips [data-tape="sky"]');
+  ok(await page.evaluate(() => window.__diary.getTape()) === 'sky', '마스킹 테이프 색 변경');
+  // 새로고침 후 유지
+  await page.reload();
+  await page.evaluate(() => window.__diary.ready());
+  ok(await page.evaluate(() => window.__diary.getFrame()) === 'black', '새로고침 후 프레임 색 유지');
+  // 사진 있는 날 크게보기 카드에 마스킹 테이프 요소가 있는지
+  await page.evaluate(() => window.__diary.goCalendar('2026-07'));
+  await page.evaluate(() => window.__diary.selectDate('2026-07-06'));
+  await page.waitForTimeout(120);
+  ok(await page.$('#cal-entry-list .pg-media.polaroid .masking-tape') !== null, '사진 위 마스킹 테이프 요소 존재');
 
   console.log('\n[34] PWA 구성');
   const root = path.resolve(__dirname, '..');
