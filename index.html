@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>순간일기 — 목소리와 풍경으로 쓰는 하루</title>
 <meta name="description" content="음성으로 오늘의 느낌을 말하면 글이 되고, 카메라로 지금 보는 풍경을 담는 책 모양 일기장. 월말엔 한 달의 여정을 짧은 브이로그로.">
-<meta name="theme-color" content="#7a5c44">
+<meta name="theme-color" content="#ffffff">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -16,9 +16,10 @@
 </head>
 <body>
 
-<!-- ============ 1) 표지 (눌러서 진입) ============ -->
+<!-- ============ 표지 (눌러서 진입) ============ -->
 <section id="scr-cover" class="screen">
   <button class="cover-book" id="btn-open-book" aria-label="일기장 열기">
+    <span class="cover-band" aria-hidden="true"></span>
     <span class="stitch" aria-hidden="true"></span>
     <div class="cover-title">순간일기</div>
     <div class="cover-sub">목소리와 풍경으로 쓰는 하루</div>
@@ -26,16 +27,9 @@
   <div class="cover-count" id="cover-count"></div>
 </section>
 
-<!-- ============ 2) 달력 (홈) ============ -->
-<section id="scr-cal" class="screen hidden">
-  <div class="book-top">
-    <h1 class="app-title" id="cal-home-title">순간일기</h1>
-    <div class="top-btns">
-      <button class="tbtn" id="btn-cal-vlog">월말 브이로그</button>
-      <button class="tbtn" id="btn-cal-settings">설정</button>
-    </div>
-  </div>
-
+<!-- ============ 달력 (홈) ============ -->
+<section id="scr-cal" class="screen hidden tabscr">
+  <header class="top-bar"><h1 class="app-title" id="cal-home-title">순간일기</h1></header>
   <div class="cal-screen-card">
     <div class="cal-head">
       <button class="nav-arrow sm" id="cal-prev" aria-label="이전 달">◀</button>
@@ -43,59 +37,76 @@
       <button class="nav-arrow sm" id="cal-next" aria-label="다음 달">▶</button>
     </div>
     <div class="cal-grid" id="cal-grid"></div>
-    <p class="cal-hint" id="cal-hint">오늘 날짜를 누르면 오늘의 순간을 담을 수 있어요. 기록이 있는 날은 눌러서 다시 볼 수 있어요.</p>
+    <p class="cal-hint">어느 날짜든 눌러서 그날을 채우거나 다시 볼 수 있어요.</p>
   </div>
-
-  <button id="btn-cal-new" class="tbtn primary big-cta">오늘의 순간 담기</button>
 </section>
 
-<!-- ============ 3) 책 (스프레드) ============ -->
+<!-- ============ 모아보기 (그리드 갤러리) ============ -->
+<section id="scr-grid" class="screen hidden tabscr">
+  <header class="top-bar">
+    <h1 class="app-title">모아보기</h1>
+    <span class="top-hint" id="grid-hint">길게 눌러 편집 · 위아래로 쓸면 와르르</span>
+  </header>
+  <div class="grid-wrap" id="grid-wrap"></div>
+</section>
+
+<!-- ============ 기분 통계 ============ -->
+<section id="scr-stats" class="screen hidden tabscr">
+  <header class="top-bar"><h1 class="app-title">기분 통계</h1></header>
+  <div class="stats-card">
+    <div class="stats-head">
+      <button class="nav-arrow sm" id="stats-prev" aria-label="이전 달">◀</button>
+      <span id="stats-title"></span>
+      <button class="nav-arrow sm" id="stats-next" aria-label="다음 달">▶</button>
+    </div>
+    <p class="stats-summary" id="stats-summary"></p>
+    <div class="mood-chart" id="mood-chart"></div>
+    <p class="stats-note" id="stats-note"></p>
+  </div>
+</section>
+
+<!-- ============ 브이로그 모아보기 ============ -->
+<section id="scr-vloglib" class="screen hidden tabscr">
+  <header class="top-bar"><h1 class="app-title">브이로그</h1></header>
+  <button class="tbtn primary big-cta" id="btn-new-vlog">새 브이로그 만들기</button>
+  <div class="vloglib-wrap" id="vloglib-wrap"></div>
+</section>
+
+<!-- ============ 책 (일기장 상세) ============ -->
 <section id="scr-book" class="screen hidden">
   <div class="book-top">
+    <button class="tbtn" id="btn-book-back">돌아가기</button>
     <h1 class="app-title" id="book-home-title">순간일기</h1>
-    <div class="top-btns">
-      <button class="tbtn" id="btn-cal">달력</button>
-      <button class="tbtn" id="btn-go-vlog">월말 브이로그</button>
-      <button class="tbtn" id="btn-go-settings">설정</button>
-    </div>
+    <span class="top-spacer"></span>
   </div>
-
   <div class="book" id="book">
     <div class="page left" id="page-left"></div>
     <div class="page right" id="page-right"></div>
   </div>
-
   <div class="book-nav">
     <button class="nav-arrow" id="btn-prev" aria-label="이전 페이지">◀</button>
     <span id="pg-indicator"></span>
     <button class="nav-arrow" id="btn-next" aria-label="다음 페이지">▶</button>
   </div>
-
-  <button id="btn-new" aria-label="오늘의 순간 담기">＋</button>
 </section>
 
-<!-- ============ 4) 기록 (카메라 + 음성) ============ -->
+<!-- ============ 기록 (카메라 + 음성) ============ -->
 <section id="scr-capture" class="screen hidden">
   <div class="cap-head">
     <h2 id="cap-title">오늘의 순간 담기</h2>
     <button class="tbtn" id="btn-cap-back">돌아가기</button>
   </div>
-
   <div class="cap-card">
     <div class="cap-datebar" id="cap-datebar"></div>
-    <!-- 카메라 무대 -->
     <div class="cam-stage">
       <canvas id="cam-canvas"></canvas>
       <video id="cap-preview-video" class="hidden" playsinline muted loop></video>
       <img id="cap-preview-img" class="hidden" alt="촬영한 사진 미리보기">
-      <div class="cam-msg hidden" id="cam-msg">
-        <p id="cam-msg-text">카메라를 준비하고 있어요…</p>
-      </div>
+      <div class="cam-msg hidden" id="cam-msg"><p id="cam-msg-text">카메라를 준비하고 있어요…</p></div>
       <div class="rec-dot" id="rec-dot"><span id="rec-time">0초</span></div>
       <div id="sticker-layer"></div>
     </div>
 
-    <!-- 필터 -->
     <div class="chip-row" id="filter-row" aria-label="필터 선택">
       <button class="chip" data-filter="none">필터 없음</button>
       <button class="chip on" data-filter="vintage">빈티지</button>
@@ -107,7 +118,6 @@
       <button class="chip" data-filter="dreamy">몽환</button>
     </div>
 
-    <!-- 촬영 -->
     <div class="cap-controls">
       <div class="mode-toggle" id="mode-toggle">
         <button data-mode="photo" class="on">사진</button>
@@ -117,13 +127,11 @@
       <button id="btn-retake" class="tbtn hidden">다시 찍기</button>
     </div>
 
-    <!-- 갤러리에서 가져오기 (지나친 날 채우기) -->
     <div class="gallery-row">
       <button class="tbtn" id="btn-gallery">갤러리에서 사진·영상 가져오기</button>
       <input type="file" id="gallery-input" accept="image/*,video/*" class="hidden">
     </div>
 
-    <!-- 꾸미기 (촬영 후에만 표시) -->
     <div id="deco-box" class="hidden">
       <span class="lbl">꾸미기 — 스티커를 눌러 붙이고, 손가락으로 끌어서 옮겨보세요</span>
       <div class="chip-row" id="sticker-palette">
@@ -141,7 +149,6 @@
       </div>
     </div>
 
-    <!-- 음성 → 텍스트 -->
     <div class="voice-row">
       <button id="btn-mic" aria-label="음성으로 말하기">음성</button>
       <div class="voice-col">
@@ -150,7 +157,6 @@
       </div>
     </div>
 
-    <!-- 오늘의 기분 -->
     <div class="pick-row" id="mood-row">
       <span class="lbl">오늘의 기분</span>
       <div class="chip-row">
@@ -164,7 +170,6 @@
       </div>
     </div>
 
-    <!-- 날씨 -->
     <div class="weather-row">
       <span class="lbl">오늘 날씨</span>
       <button class="wchip" data-weather="☀️">☀️</button>
@@ -180,20 +185,17 @@
   </div>
 </section>
 
-<!-- ============ 5) 월말 브이로그 ============ -->
+<!-- ============ 월말 브이로그 만들기 ============ -->
 <section id="scr-vlog" class="screen hidden">
   <div class="cap-head">
-    <h2>월말 브이로그</h2>
+    <h2>새 브이로그</h2>
     <button class="tbtn" id="btn-vlog-back">돌아가기</button>
   </div>
-
   <div class="vlog-card">
-    <p class="desc">한 달 동안 담은 사진과 영상을 이어 붙여, 그달의 여정을 한 편의 영상으로 만들어 드려요. 아래에서 넣을 장면과 순서를 고르고, 길이를 정한 뒤 만들어 보세요.</p>
+    <p class="desc">한 달 동안 담은 사진과 영상을 이어 붙여, 그달의 여정을 한 편의 영상으로 만들어 드려요. 넣을 장면과 순서를 고르고, 길이를 정한 뒤 만들어 보세요.</p>
     <div class="vlog-pick">
       <select id="vlog-month" aria-label="브이로그를 만들 달 선택"></select>
     </div>
-
-    <!-- 간단 편집기 -->
     <div class="vlog-edit">
       <label class="vlog-audio-row lbl">제목
         <input type="text" id="vlog-title" maxlength="24" placeholder="예) 7월의 기록">
@@ -213,8 +215,6 @@
       <span class="lbl">넣을 장면 (끌어서 순서를 바꿀 수 있어요 · 체크를 풀면 빠져요)</span>
       <ul class="clip-list" id="clip-list"></ul>
     </div>
-
-    <!-- 소리 -->
     <div class="vlog-audio">
       <div class="vlog-audio-row">
         <span class="lbl">배경음악</span>
@@ -234,7 +234,6 @@
       <label class="vlog-audio-row lbl"><input type="checkbox" id="vlog-fx" checked> 장면이 바뀔 때 작은 효과음 넣기 (자체 제작)</label>
       <p class="desc">기본 배경음악과 효과음은 <b>이 앱이 그 자리에서 직접 만들어내는 소리</b>예요. 남의 음원을 쓰지 않으므로 저작권 걱정 없이 상업적으로도 자유롭게 쓸 수 있어요. 내 음원 파일을 쓸 때는 그 음원의 이용 범위를 꼭 확인해 주세요.</p>
     </div>
-
     <button class="tbtn primary" id="btn-make-vlog">만들기</button>
     <div id="vlog-progress">
       <div class="bar-wrap"><div id="vlog-bar"></div></div>
@@ -242,20 +241,20 @@
     </div>
     <div id="vlog-result">
       <video id="vlog-video" controls playsinline></video>
-      <button class="tbtn primary" id="btn-vlog-save">영상 파일로 저장</button>
+      <div class="vlog-result-btns">
+        <button class="tbtn primary" id="btn-vlog-keep">보관함에 저장</button>
+        <button class="tbtn" id="btn-vlog-save">파일로 내려받기</button>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ============ 6) 설정 ============ -->
-<section id="scr-settings" class="screen hidden">
-  <div class="cap-head">
-    <h2>설정</h2>
-    <button class="tbtn" id="btn-set-back">돌아가기</button>
-  </div>
+<!-- ============ 설정 ============ -->
+<section id="scr-settings" class="screen hidden tabscr">
+  <header class="top-bar"><h1 class="app-title">설정</h1></header>
   <div class="set-card">
     <h2>이 앱은요</h2>
-    <p>모든 기록(사진·영상·글)은 <b>이 기기 안에만</b> 저장돼요. 인터넷으로 어디에도 전송되지 않아요. 다만 브라우저 데이터를 지우면 기록도 함께 사라지니, 소중한 달은 월말 브이로그로 저장해 두세요.</p>
+    <p>모든 기록(사진·영상·글)은 <b>이 기기 안에만</b> 저장돼요. 인터넷으로 어디에도 전송되지 않아요. 다만 브라우저 데이터를 지우면 기록도 함께 사라지니, 소중한 달은 브이로그로 저장해 두세요.</p>
   </div>
   <div class="set-card">
     <h2>알림</h2>
@@ -264,7 +263,7 @@
       <span class="lbl">알림 시간</span>
       <input type="time" id="set-remind-time" value="21:00">
     </div>
-    <p id="remind-note">정한 시간에 아직 오늘 기록이 없으면 알려드려요. 앱을 홈 화면에 설치하고 열어두면 가장 잘 동작해요. (기기·브라우저에 따라 알림 권한이 필요할 수 있어요.)</p>
+    <p id="remind-note">정한 시간에 아직 오늘 기록이 없으면 알려드려요. 앱을 홈 화면에 설치하고 열어두면 가장 잘 동작해요.</p>
   </div>
   <div class="set-card">
     <h2>소리</h2>
@@ -274,7 +273,7 @@
       <input type="range" id="set-volume" min="0" max="100" value="70">
       <span class="lbl" id="volume-val">70</span>
     </div>
-    <p>버튼 소리(비눗방울), 촬영음, 종이 넘기는 소리, 브이로그 배경음악·효과음은 모두 외부 음원이 아니라 <b>앱이 직접 합성해 내는 소리</b>예요. 무료이고 상업적 이용에도 제한이 없어요.</p>
+    <p>버튼 소리(비눗방울), 촬영음, 종이 넘기는 소리, 배경음악은 모두 외부 음원이 아니라 <b>앱이 직접 합성해 내는 소리</b>예요. 무료이고 상업적 이용에도 제한이 없어요.</p>
   </div>
   <div class="set-card">
     <h2>데이터 관리</h2>
@@ -282,6 +281,33 @@
     <button class="tbtn danger" id="btn-wipe">모든 기록 지우기</button>
   </div>
 </section>
+
+<!-- ============ 하단 탭 ============ -->
+<nav id="bottomnav" class="hidden">
+  <button class="navbtn" data-scr="scr-cal" aria-label="달력">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg>
+    <span>달력</span>
+  </button>
+  <button class="navbtn" data-scr="scr-grid" aria-label="모아보기">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+    <span>모아보기</span>
+  </button>
+  <button class="navbtn" data-scr="scr-stats" aria-label="기분 통계">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke-linecap="round"/></svg>
+    <span>통계</span>
+  </button>
+  <button class="navbtn" data-scr="scr-vloglib" aria-label="브이로그">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M10 9.5l5 3-5 3z" fill="currentColor" stroke="none"/></svg>
+    <span>브이로그</span>
+  </button>
+  <button class="navbtn" data-scr="scr-settings" aria-label="설정">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 8h14M5 12h14M5 16h14" stroke-linecap="round"/><circle cx="9" cy="8" r="2" fill="var(--surface,#fff)"/><circle cx="15" cy="16" r="2" fill="var(--surface,#fff)"/></svg>
+    <span>설정</span>
+  </button>
+</nav>
+
+<!-- 오늘의 순간 담기 (플로팅) — 달력·모아보기·책에서 표시 -->
+<button id="fab" class="fab hidden" aria-label="오늘의 순간 담기">＋</button>
 
 <!-- 기록 알림 배너 -->
 <div id="reminder-banner">

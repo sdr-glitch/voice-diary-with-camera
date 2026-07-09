@@ -337,7 +337,99 @@ function ok(cond, name) {
   await page.evaluate(() => window.__diary.reminder.show());
   ok(!(await page.isVisible('#reminder-banner.on')), '오늘 이미 기록했으면 배너 안 뜸');
 
-  console.log('\n[22] PWA 구성');
+  console.log('\n[22] 하단 탭 이동');
+  await page.evaluate(() => window.__diary.show('scr-cover'));
+  await page.click('#btn-open-book');
+  ok(await page.isVisible('#scr-cal') && await page.isVisible('#bottomnav'), '표지→달력, 하단 탭 표시');
+  await page.click('#bottomnav .navbtn[data-scr="scr-grid"]');
+  ok(await page.isVisible('#scr-grid'), '모아보기 탭');
+  await page.click('#bottomnav .navbtn[data-scr="scr-stats"]');
+  ok(await page.isVisible('#scr-stats'), '통계 탭');
+  await page.click('#bottomnav .navbtn[data-scr="scr-vloglib"]');
+  ok(await page.isVisible('#scr-vloglib'), '브이로그 탭');
+  await page.click('#bottomnav .navbtn[data-scr="scr-settings"]');
+  ok(await page.isVisible('#scr-settings'), '설정 탭');
+  ok(await page.isHidden('#bottomnav') === false, '탭 화면에선 하단 탭 유지');
+
+  console.log('\n[23] 모아보기 그리드 + 롱프레스 흔들림 + 와르르');
+  // 사진 2, 영상 1, 글 1 시드 (오늘 달)
+  await page.evaluate(async (png) => {
+    await window.__diary.addEntry({ date: '2026-07-06', text: '사진 기록', dataURL: png, kind: 'photo' });
+    await window.__diary.addEntry({ date: '2026-07-07', text: '영상 기록', dataURL: png, kind: 'video', durMs: 4000 });
+    await window.__diary.addEntry({ date: '2026-07-08', text: '글만 남긴 날' });
+  }, PNG);
+  await page.click('#bottomnav .navbtn[data-scr="scr-grid"]');
+  await page.waitForTimeout(100);
+  ok(await page.evaluate(() => window.__diary.gridCount()) >= 3, `그리드에 기록 표시 (${await page.evaluate(() => window.__diary.gridCount())}개)`);
+  // 그리드 아이템 탭 → 책으로
+  await page.click('#grid-wrap .grid-item');
+  ok(await page.isVisible('#scr-book'), '그리드 아이템 누르면 책으로');
+  await page.click('#btn-book-back');
+  ok(await page.isVisible('#scr-grid'), '책에서 돌아가기→모아보기');
+  // 롱프레스 흔들림 토글 (훅)
+  await page.evaluate(() => window.__diary.setJiggle(true));
+  ok(await page.evaluate(() => window.__diary.isJiggling()), '흔들림(편집) 모드 켜짐');
+  ok(await page.evaluate(() => document.querySelector('#grid-wrap').classList.contains('jiggle')), '그리드에 흔들림 클래스');
+  // 와르르 (편집 모드에서만)
+  await page.evaluate(() => window.__diary.cascadeGrid());
+  ok(await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length) > 0, '와르르 떨어지는 애니메이션 적용');
+  await page.waitForTimeout(1250);
+  ok(await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length) === 0, '애니메이션 후 제자리로 복구');
+  await page.evaluate(() => window.__diary.setJiggle(false));
+  ok(!(await page.evaluate(() => window.__diary.isJiggling())), '다시 길게 누르면(토글) 정리됨');
+
+  console.log('\n[24] 기분 통계');
+  // 7월에 기분 몇 개 시드
+  await page.evaluate(async (png) => {
+    await window.__diary.addEntry({ date: '2026-07-10', text: 'a', mood: '행복', dataURL: png });
+    await window.__diary.addEntry({ date: '2026-07-11', text: 'b', mood: '행복', dataURL: png });
+    await window.__diary.addEntry({ date: '2026-07-12', text: 'c', mood: '평온', dataURL: png });
+  }, PNG);
+  const counts = await page.evaluate(() => window.__diary.statsCounts('2026-07'));
+  ok(counts['행복'] >= 2 && counts['평온'] >= 1, `기분 집계 (행복 ${counts['행복']}, 평온 ${counts['평온']})`);
+  await page.click('#bottomnav .navbtn[data-scr="scr-stats"]');
+  await page.waitForTimeout(100);
+  ok((await page.$$eval('#mood-chart .mood-bar-row', (n) => n.length)) === 7, '기분 7종 막대 표시');
+  ok((await page.textContent('#stats-summary')).includes('행복'), '가장 많은 기분 요약(행복)');
+
+  console.log('\n[25] 브이로그: 사진·영상만(글 제외) + 보관함 저장·재생·삭제');
+  await page.evaluate(() => window.__diary.show('scr-vlog'));
+  await page.selectOption('#vlog-month', '2026-07');
+  await page.waitForTimeout(120);
+  // 7월 clip-list 에는 글만 있는 날(2026-07-08)이 빠져야 함
+  const clipDates = await page.$$eval('#clip-list .clip-item .clip-info b', (ns) => ns.map((n) => n.textContent));
+  ok(!clipDates.includes('7월 8일'), '글만 있는 날은 브이로그 장면 목록에서 제외');
+  ok(clipDates.includes('7월 7일'), '영상 있는 날은 포함');
+  await page.fill('#vlog-title', '칠월 기록');
+  await page.click('#btn-make-vlog');
+  await page.waitForSelector('#vlog-result.on', { timeout: 40000 });
+  ok(await page.isVisible('#btn-vlog-keep'), '보관함 저장 버튼 표시');
+  await page.click('#btn-vlog-keep');
+  await page.waitForSelector('#scr-vloglib:not(.hidden)');
+  let vl = await page.evaluate(() => window.__diary.getVlogs());
+  ok(vl.length === 1 && vl[0].size > 5000, `브이로그 보관함에 저장 (${vl[0] ? vl[0].size : 0}B)`);
+  ok((await page.$$eval('.vlog-card-item', (n) => n.length)) === 1, '보관함 카드 표시');
+  // 재생(인라인 video로 교체)
+  await page.click('.vlog-play-btn');
+  ok(await page.isVisible('.vlog-inline-video'), '카드에서 재생(인라인 영상)');
+  // 새로고침 후 유지
+  await page.reload();
+  await page.evaluate(() => window.__diary.ready());
+  vl = await page.evaluate(() => window.__diary.getVlogs());
+  ok(vl.length === 1, '새로고침 후 브이로그 보관함 유지');
+  // 삭제
+  await page.evaluate((id) => window.__diary.deleteVlogNow(id), vl[0].id);
+  vl = await page.evaluate(() => window.__diary.getVlogs());
+  ok(vl.length === 0, '브이로그 삭제');
+
+  console.log('\n[26] 흰색 책 디자인 확인');
+  const coverBg = await page.evaluate(() => {
+    window.__diary.show('scr-cover');
+    return getComputedStyle(document.querySelector('.cover-book')).backgroundImage;
+  });
+  ok(coverBg.includes('rgb(255, 255, 255)'), `표지가 흰색 계열 (${coverBg.slice(0, 60)}…)`);
+
+  console.log('\n[27] PWA 구성');
   const root = path.resolve(__dirname, '..');
   const mf = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   ok(mf.name && mf.icons.length >= 2 && mf.display === 'standalone', 'manifest 필수 필드');

@@ -12,6 +12,8 @@
 const LS_PREFIX = 'momentDiary:';
 const DB_NAME = 'moment-diary';
 const DB_STORE = 'entries';
+const VLOG_STORE = 'vlogs';       // 만든 브이로그 보관함
+const VLOG_CAP = 24;              // 보관 최대 개수
 const VLOG_INTRO_MS = 1900;       // 브이로그 표지
 const VLOG_OUTRO_MS = 1600;       // 브이로그 마무리
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
@@ -251,15 +253,35 @@ function scheduleBgmBar(ctx, dest, name, t0) {
 /* ==================== IndexedDB ==================== */
 function initDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       const d = req.result;
-      if (!d.objectStoreNames.contains(DB_STORE)) {
-        d.createObjectStore(DB_STORE, { keyPath: 'id' });
-      }
+      if (!d.objectStoreNames.contains(DB_STORE)) d.createObjectStore(DB_STORE, { keyPath: 'id' });
+      if (!d.objectStoreNames.contains(VLOG_STORE)) d.createObjectStore(VLOG_STORE, { keyPath: 'id' });
     };
     req.onsuccess = () => { db = req.result; resolve(); };
     req.onerror = () => reject(req.error);
+  });
+}
+function vlogAll() {
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(VLOG_STORE, 'readonly').objectStore(VLOG_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+function vlogPut(rec) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(VLOG_STORE, 'readwrite');
+    tx.objectStore(VLOG_STORE).put(rec);
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+  });
+}
+function vlogDelete(id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(VLOG_STORE, 'readwrite');
+    tx.objectStore(VLOG_STORE).delete(id);
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
   });
 }
 function dbAll() {
@@ -297,6 +319,9 @@ function sortEntries() {
   entries.sort((a, b) => (a.date === b.date ? a.ts - b.ts : (a.date < b.date ? -1 : 1)));
 }
 
+const TAB_SCREENS = ['scr-cal', 'scr-grid', 'scr-stats', 'scr-vloglib', 'scr-settings'];
+const FAB_SCREENS = ['scr-cal', 'scr-grid', 'scr-book'];
+
 /* ==================== 화면 전환 ==================== */
 function show(id) {
   curScreen = id;
@@ -304,10 +329,19 @@ function show(id) {
   if (id !== 'scr-capture') stopCamera();
   if (id === 'scr-capture') openCapture();
   if (id === 'scr-cal') renderCal();
+  if (id === 'scr-grid') renderGrid();
+  if (id === 'scr-stats') renderMoodStats();
+  if (id === 'scr-vloglib') renderVlogLib();
   if (id === 'scr-book') renderSpread();
   if (id === 'scr-vlog') fillVlogMonths();
   if (id === 'scr-settings') renderStats();
   if (id === 'scr-cover') renderCoverCount();
+  // 하단 탭 표시 + 활성 탭
+  const nav = $('#bottomnav');
+  nav.classList.toggle('hidden', !TAB_SCREENS.includes(id));
+  $$('#bottomnav .navbtn').forEach((b) => b.classList.toggle('on', b.dataset.scr === id));
+  // 플로팅 기록 버튼
+  $('#fab').classList.toggle('hidden', !FAB_SCREENS.includes(id));
 }
 /** 하위 화면 열기 — 돌아갈 화면(backTo)을 현재 화면으로 기억 */
 function openSub(id) { backTo = curScreen; show(id); }
@@ -1014,10 +1048,12 @@ function fillVlogMonths() {
   buildClipList();
 }
 
-/** 선택한 달의 장면 목록(포함/순서 편집용)을 만든다 */
+/** 선택한 달의 장면 목록(포함/순서 편집용) — 사진·영상만(글만 있는 날 제외) */
 function buildClipList() {
   const ym = $('#vlog-month').value;
-  vlogClips = entries.filter((e) => e.date.startsWith(ym)).map((e) => ({ id: e.id, on: true }));
+  vlogClips = entries
+    .filter((e) => e.date.startsWith(ym) && (e.kind === 'photo' || e.kind === 'video'))
+    .map((e) => ({ id: e.id, on: true }));
   renderClipList();
 }
 function kindLabel(e) {
@@ -1025,7 +1061,7 @@ function kindLabel(e) {
 }
 function renderClipList() {
   const ul = $('#clip-list');
-  if (!vlogClips.length) { ul.innerHTML = '<li class="clip-empty">이 달에는 아직 기록이 없어요.</li>'; return; }
+  if (!vlogClips.length) { ul.innerHTML = '<li class="clip-empty">이 달에는 넣을 사진·영상이 없어요. (글만 있는 날은 브이로그에서 제외돼요)</li>'; return; }
   ul.innerHTML = vlogClips.map((c, i) => {
     const e = entries.find((x) => x.id === c.id);
     if (!e) return '';
@@ -1151,6 +1187,8 @@ async function buildVlog(ym, onProg = () => {}, opts = {}) {
   } else {
     list = entries.filter((e) => e.date.startsWith(ym));
   }
+  // 브이로그는 사진·영상만 사용 (글만 있는 날 제외)
+  list = list.filter((e) => (e.kind === 'photo' || e.kind === 'video') && e.blob);
   if (!list.length) throw new Error('empty-month');
   const mime = pickMime();
   if (!mime) throw new Error('no-recorder');
@@ -1315,6 +1353,7 @@ async function makeVlogUI() {
       targetSec: vlogTargetSec,
       ids,
     };
+    lastVlogMeta = { ym, title: $('#vlog-title').value, ids };
     vlogBlob = await buildVlog(ym, (done, total, msg) => {
       bar.style.width = Math.round((done / total) * 100) + '%';
       stepEl.textContent = msg;
@@ -1344,6 +1383,205 @@ function downloadVlog() {
   a.download = `순간일기_${ym}_브이로그.webm`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* ==================== 브이로그 보관함 ==================== */
+let vlogs = [];
+let lastVlogMeta = null;             // 방금 만든 브이로그 정보
+const vlogURLCache = new Map();
+function vlogURL(rec) {
+  if (!vlogURLCache.has(rec.id)) vlogURLCache.set(rec.id, URL.createObjectURL(rec.blob));
+  return vlogURLCache.get(rec.id);
+}
+async function loadVlogs() {
+  vlogs = await vlogAll();
+  vlogs.sort((a, b) => b.createdTs - a.createdTs);
+}
+async function saveVlogToLib() {
+  if (!vlogBlob || !lastVlogMeta) { toast('먼저 브이로그를 만들어 주세요.'); return; }
+  const first = entries.find((e) => (lastVlogMeta.ids || []).includes(e.id));
+  const rec = {
+    id: uid(), ym: lastVlogMeta.ym, title: lastVlogMeta.title || `${lastVlogMeta.ym.replace('-', '년 ')}월`,
+    createdTs: Date.now(), thumb: first ? first.thumb : null, blob: vlogBlob,
+  };
+  await vlogPut(rec);
+  await loadVlogs();
+  // 보관 개수 제한 — 오래된 것부터 정리
+  while (vlogs.length > VLOG_CAP) {
+    const old = vlogs.pop();
+    await vlogDelete(old.id);
+    const u = vlogURLCache.get(old.id); if (u) { URL.revokeObjectURL(u); vlogURLCache.delete(old.id); }
+  }
+  toast('브이로그 보관함에 저장했어요.');
+  show('scr-vloglib');
+}
+async function deleteVlog(id) {
+  const rec = vlogs.find((v) => v.id === id);
+  const ok = await confirmModal(`"${rec ? (rec.title || '브이로그') : '브이로그'}"를 보관함에서 지울까요?`);
+  if (!ok) return;
+  await vlogDelete(id);
+  const u = vlogURLCache.get(id); if (u) { URL.revokeObjectURL(u); vlogURLCache.delete(id); }
+  await loadVlogs();
+  renderVlogLib();
+  toast('브이로그를 지웠어요.');
+}
+function downloadVlogRec(id) {
+  const rec = vlogs.find((v) => v.id === id);
+  if (!rec) return;
+  const a = document.createElement('a');
+  a.href = vlogURL(rec);
+  a.download = `순간일기_${rec.ym.replace('-', '년')}월_브이로그.webm`;
+  a.click();
+}
+function renderVlogLib() {
+  const wrap = $('#vloglib-wrap');
+  if (!vlogs.length) {
+    wrap.innerHTML = '<p class="empty-note">아직 만든 브이로그가 없어요.<br>위 버튼으로 첫 브이로그를 만들어 보세요.</p>';
+    return;
+  }
+  wrap.innerHTML = vlogs.map((v) => {
+    const d = new Date(v.createdTs);
+    const dstr = `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`;
+    return `<div class="vlog-card-item" data-id="${v.id}">
+      <button class="vlog-thumb vlog-play-btn" data-id="${v.id}" aria-label="재생">
+        ${v.thumb ? `<img src="${v.thumb}" alt="">` : ''}<span class="vlog-play">▶</span>
+      </button>
+      <div class="vlog-meta">
+        <b>${escapeHTML(v.title || '브이로그')}</b>
+        <span>${v.ym.replace('-', '년 ')}월 · ${dstr}</span>
+      </div>
+      <div class="vlog-item-btns">
+        <button class="tbtn vlog-dl-btn" data-id="${v.id}">저장</button>
+        <button class="tbtn danger vlog-del-btn" data-id="${v.id}">삭제</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function playVlogRec(id) {
+  const rec = vlogs.find((v) => v.id === id);
+  if (!rec) return;
+  const card = $(`.vlog-card-item[data-id="${id}"]`);
+  if (!card || card.querySelector('video')) return;
+  const thumb = card.querySelector('.vlog-thumb');
+  const v = document.createElement('video');
+  v.src = vlogURL(rec); v.controls = true; v.autoplay = true; v.playsInline = true;
+  v.className = 'vlog-inline-video';
+  thumb.replaceWith(v);
+  v.play().catch(() => {});
+}
+
+/* ==================== 모아보기 (그리드 갤러리) ==================== */
+let gridJiggle = false;
+let cascading = false;
+function gridSortedRefs() {
+  return entries.map((e, i) => ({ e, i }))
+    .sort((a, b) => (a.e.date === b.e.date ? b.e.ts - a.e.ts : (a.e.date < b.e.date ? 1 : -1)));
+}
+function renderGrid() {
+  const wrap = $('#grid-wrap');
+  const refs = gridSortedRefs();
+  if (!refs.length) {
+    wrap.innerHTML = '<p class="empty-note">아직 기록이 없어요.<br>아래 ＋ 버튼으로 첫 순간을 담아보세요.</p>';
+    wrap.classList.remove('jiggle');
+    return;
+  }
+  wrap.innerHTML = refs.map(({ e, i }) => {
+    const d = parseDate(e.date);
+    const media = e.thumb
+      ? `<img src="${e.thumb}" alt="">`
+      : `<span class="grid-textcard">${escapeHTML((e.text || '기록').replace(/\s+/g, ' ').slice(0, 14))}</span>`;
+    const tag = e.kind === 'video' ? '<span class="grid-vtag">영상</span>' : '';
+    return `<button class="grid-item" data-idx="${i}" style="--jd:${(i % 6) * 0.06}s">
+      ${media}${tag}
+      <span class="grid-date">${d.getMonth() + 1}.${d.getDate()}</span>
+    </button>`;
+  }).join('');
+  wrap.classList.toggle('jiggle', gridJiggle);
+}
+function setJiggle(on) {
+  gridJiggle = (on === undefined) ? !gridJiggle : on;
+  $('#grid-wrap').classList.toggle('jiggle', gridJiggle);
+  $('#grid-hint').textContent = gridJiggle
+    ? '위아래로 쓸면 사진이 와르르 · 다시 길게 누르면 정리돼요'
+    : '길게 눌러 편집 · 위아래로 쓸면 와르르';
+}
+function cascadeGrid() {
+  if (cascading || !gridJiggle) return;
+  cascading = true;
+  const items = $$('#grid-wrap .grid-item');
+  items.forEach((el, k) => {
+    el.style.setProperty('--fd', (k * 45) + 'ms');
+    el.style.setProperty('--fx', (((k * 7) % 13) - 6) * 5 + 'px');
+    el.style.setProperty('--fr', ((k % 2 ? 1 : -1) * (12 + (k * 9) % 26)) + 'deg');
+    el.classList.add('falling');
+  });
+  playFx('flip');
+  setTimeout(() => {
+    cascading = false;
+    renderGrid();           // 다시 제자리로 (여전히 편집 모드면 흔들림 유지)
+  }, 1150);
+}
+/** 그리드 제스처: 길게 누르면 흔들림(편집) 토글, 편집 중 위아래로 쓸면 와르르 */
+function bindGrid() {
+  const gw = $('#grid-wrap');
+  let lpTimer = 0, startY = 0, moved = false, suppressClick = false;
+  gw.addEventListener('pointerdown', (e) => {
+    startY = e.clientY; moved = false;
+    clearTimeout(lpTimer);
+    lpTimer = setTimeout(() => { setJiggle(); suppressClick = true; }, 450);
+  });
+  gw.addEventListener('pointermove', (e) => {
+    if (Math.abs(e.clientY - startY) > 12) { moved = true; clearTimeout(lpTimer); }
+    if (gridJiggle && Math.abs(e.clientY - startY) > 55) cascadeGrid();
+  });
+  const end = () => { clearTimeout(lpTimer); };
+  gw.addEventListener('pointerup', end);
+  gw.addEventListener('pointercancel', end);
+  gw.addEventListener('click', (e) => {
+    if (suppressClick) { suppressClick = false; return; }
+    const it = e.target.closest('.grid-item');
+    if (!it) return;
+    if (gridJiggle) return;   // 편집 모드에선 이동하지 않음
+    jumpToEntry(Number(it.dataset.idx));
+  });
+}
+
+/* ==================== 기분 통계 ==================== */
+const MOODS = ['설렘', '행복', '평온', '그저그럼', '지침', '울적', '속상'];
+const MOOD_COLOR = {
+  설렘: '#e0a13c', 행복: '#57b98c', 평온: '#7fae7f', 그저그럼: '#b3aa99',
+  지침: '#c9895a', 울적: '#7a86b0', 속상: '#c05b5b',
+};
+let statsYM = '';
+function shiftStatsMonth(d) {
+  const [y, m] = statsYM.split('-').map(Number);
+  const nd = new Date(y, m - 1 + d, 1);
+  statsYM = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}`;
+  renderMoodStats();
+}
+function renderMoodStats() {
+  if (!statsYM) statsYM = todayStr().slice(0, 7);
+  const [y, m] = statsYM.split('-').map(Number);
+  $('#stats-title').textContent = `${y}년 ${m}월`;
+  const monthEntries = entries.filter((e) => e.date.startsWith(statsYM));
+  const counts = {}; MOODS.forEach((k) => (counts[k] = 0));
+  let withMood = 0;
+  monthEntries.forEach((e) => { if (e.mood && counts[e.mood] !== undefined) { counts[e.mood]++; withMood++; } });
+  const max = Math.max(1, ...MOODS.map((k) => counts[k]));
+  $('#mood-chart').innerHTML = MOODS.map((k) => `
+    <div class="mood-bar-row">
+      <span class="mood-name">${moodLabel(k)}</span>
+      <div class="mood-track"><div class="mood-fill" style="width:${Math.round(counts[k] / max * 100)}%;background:${MOOD_COLOR[k]}"></div></div>
+      <span class="mood-cnt">${counts[k]}</span>
+    </div>`).join('');
+  if (!withMood) {
+    $('#stats-summary').textContent = '이 달엔 기분을 기록한 날이 아직 없어요.';
+    $('#stats-note').textContent = '기록할 때 오늘의 기분을 함께 골라보세요.';
+  } else {
+    const top = MOODS.reduce((a, b) => (counts[b] > counts[a] ? b : a));
+    $('#stats-summary').textContent = `이번 달 가장 많이 느낀 기분은 「${moodLabel(top)}」이에요.`;
+    $('#stats-note').textContent = `기분을 남긴 날 ${withMood}일 · 이 달 기록 ${monthEntries.length}개`;
+  }
 }
 
 /* ==================== 달력 (홈 화면) ==================== */
@@ -1393,6 +1631,7 @@ function renderCal() {
 }
 function jumpToEntry(idx) {
   pageIndex = isMobile() ? idx : idx - (idx % 2);
+  backTo = TAB_SCREENS.includes(curScreen) ? curScreen : 'scr-cal';
   playFx('flip');
   show('scr-book');
 }
@@ -1413,7 +1652,10 @@ async function wipeAll() {
     .forEach((k) => localStorage.removeItem(k));
   mediaURLCache.forEach((u) => URL.revokeObjectURL(u));
   mediaURLCache.clear();
+  vlogURLCache.forEach((u) => URL.revokeObjectURL(u));
+  vlogURLCache.clear();
   entries = [];
+  vlogs = [];
   pageIndex = 0;
   await initDB();
   toast('모든 기록을 지웠어요. 새 마음으로 시작해요.');
@@ -1465,10 +1707,12 @@ function bind() {
   $('#cal-home-title').onclick = () => show('scr-cover');
   $('#book-home-title').onclick = () => show('scr-cover');
 
-  // 달력 화면
-  $('#btn-cal-vlog').onclick = () => openSub('scr-vlog');
-  $('#btn-cal-settings').onclick = () => openSub('scr-settings');
-  $('#btn-cal-new').onclick = () => openCaptureFor(todayStr());
+  // 하단 탭
+  $$('#bottomnav .navbtn').forEach((b) => { b.onclick = () => show(b.dataset.scr); });
+  // 플로팅 기록 버튼
+  $('#fab').onclick = () => openCaptureFor(todayStr());
+
+  // 달력
   $('#cal-prev').onclick = () => shiftCalMonth(-1);
   $('#cal-next').onclick = () => shiftCalMonth(1);
   $('#cal-grid').addEventListener('click', (e) => {
@@ -1478,16 +1722,28 @@ function bind() {
     if (day.classList.contains('has')) jumpToEntry(Number(day.dataset.idx));
   });
 
-  // 책 화면
-  $('#btn-cal').onclick = () => goCalendar(calYM || (entries[pageIndex] ? entries[pageIndex].date.slice(0, 7) : todayStr().slice(0, 7)));
-  $('#btn-go-vlog').onclick = () => openSub('scr-vlog');
-  $('#btn-go-settings').onclick = () => openSub('scr-settings');
-  $('#btn-new').onclick = () => openCaptureFor(todayStr());
+  // 기분 통계
+  $('#stats-prev').onclick = () => shiftStatsMonth(-1);
+  $('#stats-next').onclick = () => shiftStatsMonth(1);
 
-  // 하위 화면 돌아가기
+  // 모아보기 (그리드) — 롱프레스 흔들림 + 위아래 스와이프 와르르
+  bindGrid();
+
+  // 브이로그 보관함
+  $('#btn-new-vlog').onclick = () => openSub('scr-vlog');
+  $('#vloglib-wrap').addEventListener('click', (e) => {
+    const play = e.target.closest('.vlog-play-btn');
+    const dl = e.target.closest('.vlog-dl-btn');
+    const del = e.target.closest('.vlog-del-btn');
+    if (play) playVlogRec(play.dataset.id);
+    else if (dl) downloadVlogRec(dl.dataset.id);
+    else if (del) deleteVlog(del.dataset.id);
+  });
+
+  // 책·하위 화면 돌아가기
+  $('#btn-book-back').onclick = () => show(backTo);
   $('#btn-cap-back').onclick = () => show(backTo);
   $('#btn-vlog-back').onclick = () => show(backTo);
-  $('#btn-set-back').onclick = () => show(backTo);
 
   // 책: 개별 삭제 / 빈 페이지 클릭 → 기록하기
   $('#book').addEventListener('click', (e) => {
@@ -1535,6 +1791,7 @@ function bind() {
   $('#btn-mic').onclick = () => { playFx('mic'); toggleSpeech(); };
   $('#btn-save-entry').onclick = saveEntry;
   $('#btn-make-vlog').onclick = makeVlogUI;
+  $('#btn-vlog-keep').onclick = saveVlogToLib;
   $('#btn-vlog-save').onclick = downloadVlog;
   $('#btn-wipe').onclick = wipeAll;
 
@@ -1645,6 +1902,7 @@ async function init() {
   await initDB();
   entries = await dbAll();
   sortEntries();
+  await loadVlogs();
   pageIndex = maxIndex();
   renderCoverCount();
   scheduleReminder();
@@ -1704,6 +1962,15 @@ window.__diary = {
     let s = 0; for (let i = 0; i < d.length; i += 4) s += Math.abs(d[i]); return s / (d.length / 4);
   },
   reminder: { on: remindOn, time: remindTime, show: showReminderBanner, schedule: scheduleReminder },
+  // 모아보기·통계·브이로그 보관함 훅
+  setJiggle, isJiggling: () => gridJiggle, cascadeGrid,
+  gridCount: () => $$('#grid-wrap .grid-item').length,
+  statsCounts: (ym) => { statsYM = ym; renderMoodStats();
+    const c = {}; MOODS.forEach((k) => (c[k] = 0));
+    entries.filter((e) => e.date.startsWith(ym)).forEach((e) => { if (c[e.mood] !== undefined) c[e.mood]++; });
+    return c; },
+  saveVlogToLib, getVlogs: () => vlogs.map((v) => ({ id: v.id, ym: v.ym, title: v.title, size: v.blob ? v.blob.size : 0 })),
+  deleteVlogNow: async (id) => { await vlogDelete(id); await loadVlogs(); renderVlogLib(); },
   // 폴라로이드 프레임 렌더 검증 (영상 재생 없이 한 장면 그려 픽셀 확인)
   async renderPolaroidTest(dataURL) {
     const W = 720, H = 540;

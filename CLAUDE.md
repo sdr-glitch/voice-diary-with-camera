@@ -16,7 +16,11 @@
 
 ## 화면 흐름
 
-표지(누르면 진입) → **달력(홈)** → (기록 있는 날 클릭 → 책 / 오늘 클릭 → 기록) → 기록(카메라·음성) → 저장 시 책. 상단 '순간일기' 제목은 항상 표지로. 하위 화면(기록·브이로그·설정)은 `openSub()`가 돌아갈 화면(`backTo`)을 기억.
+표지(누르면 진입) → **하단 탭 5개**: 달력(홈)·모아보기·통계·브이로그·설정. `TAB_SCREENS`일 때만 `#bottomnav` 표시·활성 탭 갱신, `FAB_SCREENS`(달력·모아보기·책)에서 `#fab` 표시. 책·기록·브이로그 만들기는 탭이 아닌 상세/하위 화면(돌아가기 버튼, `backTo`). 달력의 어느 날짜든 클릭 → 기록 있으면 책, 없으면 기록. '순간일기' 제목(달력·책)은 표지로.
+
+## 디자인 톤 (화이트)
+
+경쟁 앱 벤치마킹으로 **화이트 톤**: `--bg` 따뜻한 화이트, 카드·책·표지 흰색(`--paper/--cover=#fff`), 캐러멜(`--accent`)은 포인트/활성 탭/FAB에만. **책 콘셉트 유지하되 흰색**. 색은 반드시 `:root` 토큰.
 
 ## UI 규칙
 
@@ -40,7 +44,10 @@
 - localStorage(`momentDiary:`): sound(on/off)·volume(0~100)·remindOn·remindTime·outro.
 - **필터 8종**: none·vintage·colorpop·fisheye·film·retro(폴더폰: 저해상도 픽셀화+초록 LCD+스캔라인)·mono·dreamy. `CSS_FILTER`(ctx.filter)+수동 오버레이, retro는 축소→확대 픽셀화.
 - **날짜 채우기**: `captureDate`가 기록 대상 날짜. `openCaptureFor(date)`로 달력의 지난 날/오늘 진입. 갤러리 가져오기 `importFromGallery(file)`(사진은 필터 적용, 영상은 원본+메타 durMs).
-- **브이로그 폴라로이드**: `polaroidGeom/drawPolaroidFrame/drawMediaCover(zoom)/polaroidStickers/polaroidCaption`. 사진은 켄번즈(zoom 1→1.09), 영상은 그대로. 아웃트로는 `opts.outro`(수정·저장, 기본 `DEFAULT_OUTRO`) + `APP_NAME` 고정 소자막.
+- **브이로그 폴라로이드**: `polaroidGeom/drawPolaroidFrame/drawMediaCover(zoom)/polaroidStickers/polaroidCaption`. 사진은 켄번즈(zoom 1→1.09), 영상은 그대로. 아웃트로는 `opts.outro`(수정·저장, 기본 `DEFAULT_OUTRO`) + `APP_NAME` 고정 소자막. **브이로그는 사진·영상만**(글만 있는 날 제외 — `buildClipList`/`buildVlog`에서 필터).
+- **모아보기**(`renderGrid`): 최신순 격자. `bindGrid()` — 롱프레스(450ms) `setJiggle` 토글, 편집 중 위아래 스와이프(>55px) `cascadeGrid`(스태거 낙하 후 `renderGrid` 복구). 탭 시 `jumpToEntry`(편집 중엔 무시).
+- **기분 통계**(`renderMoodStats`): 월별 `MOODS` 분포 막대(자작 CSS 바)+최다 기분 요약. `statsYM` 상태.
+- **브이로그 보관함**: IndexedDB `vlogs` 스토어(DB v2). `saveVlogToLib`(생성 후 `#btn-vlog-keep`), `renderVlogLib` 카드(재생=인라인 video/저장/삭제), `VLOG_CAP`개 초과 시 오래된 것 정리.
 - localStorage는 `momentDiary:` 접두사 (작은 상태만)
 - 전체 초기화는 IndexedDB 삭제 + `momentDiary:*` 키 삭제 둘 다 필요
 
@@ -51,7 +58,7 @@ NODE_PATH=$(npm root -g) PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node tests/sm
 ```
 
 - headless Chromium + `--use-fake-device-for-media-stream`(가짜 카메라)으로 전 구간 검증
-- **테스트 훅** `window.__diary`: `ready() getEntries() getPageIndex() show(id) flip(dir) saveEntry() deleteEntry(id) buildVlog(ym,onProg,{bgm,fx,title,outro,targetSec,ids}) addEntry({...,mood,durMs}) camState()(recording 포함) testFilter(name) speechSupported() addSticker/getStickers goCalendar(ym) jumpToEntry(idx) openCaptureFor(date)/getCaptureDate() importFile(file)/setFilter(f) startVideoRec/stopVideoRec/isRecording getClips/moveClip/toggleClip/setTarget bgmSample/fxSample/bubbleSample reminder{on,time,show,schedule} renderPolaroidTest(dataURL) userAudioLoaded _lastVlogAudioTracks`
+- **테스트 훅** `window.__diary`: `ready() getEntries() getPageIndex() show(id) flip(dir) saveEntry() deleteEntry(id) buildVlog(ym,onProg,{bgm,fx,title,outro,targetSec,ids}) addEntry({...,mood,durMs}) camState()(recording 포함) testFilter(name) speechSupported() addSticker/getStickers goCalendar(ym) jumpToEntry(idx) openCaptureFor(date)/getCaptureDate() importFile(file)/setFilter(f) startVideoRec/stopVideoRec/isRecording getClips/moveClip/toggleClip/setTarget bgmSample/fxSample/bubbleSample reminder{on,time,show,schedule} renderPolaroidTest(dataURL) setJiggle/isJiggling/cascadeGrid/gridCount statsCounts(ym) saveVlogToLib/getVlogs/deleteVlogNow(id) userAudioLoaded _lastVlogAudioTracks`
 - 큰 기록은 IndexedDB에 있으므로 localStorage 직접 읽기/시드 금지 — 훅 사용
 - 음성 받아쓰기는 headless에서 실제 변환 불가 → 안내 문구 + 직접 입력 경로만 검증
 
