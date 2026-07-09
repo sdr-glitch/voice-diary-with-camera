@@ -271,7 +271,7 @@ function ok(cond, name) {
   let filled = (await page.evaluate(() => window.__diary.getEntries())).find((e) => e.text.includes('오월의 지난 날'));
   ok(filled && filled.date === '2026-05-10', `지난 날짜(${filled ? filled.date : '?'})로 저장됨`);
 
-  console.log('\n[17] 갤러리에서 사진 가져오기');
+  console.log('\n[17] 갤러리 사진 — 필터 재적용 + 크기 조절');
   await page.evaluate(() => window.__diary.openCaptureFor('2026-05-11'));
   await page.waitForSelector('#scr-capture:not(.hidden)');
   await page.evaluate(async (png) => {
@@ -280,10 +280,27 @@ function ok(cond, name) {
   }, PNG);
   await page.waitForFunction(() => window.__diary.camState().captured === 'photo', null, { timeout: 5000 });
   ok(await page.isVisible('#cap-preview-img'), '갤러리 사진 미리보기 표시');
+  ok(await page.isVisible('#fit-controls'), '사진 크기 조절 컨트롤 표시');
+  // 갤러리 사진에도 필터가 적용되는지 (필터 바꾸면 미리보기 src가 바뀜)
+  await page.click('#filter-row .chip[data-filter="vintage"]');
+  await page.waitForTimeout(120);
+  const src1 = await page.evaluate(() => document.querySelector('#cap-preview-img').src);
+  await page.click('#filter-row .chip[data-filter="mono"]');
+  await page.waitForTimeout(120);
+  const src2 = await page.evaluate(() => document.querySelector('#cap-preview-img').src);
+  ok(src1 !== src2 && src2.startsWith('data:image'), '갤러리 사진에 필터가 다시 적용됨(미리보기 갱신)');
+  // 크기 조절 (＋버튼 → scale 증가, transform 반영)
+  await page.click('#fit-in'); await page.click('#fit-in');
+  const fit = await page.evaluate(() => window.__diary.getFit());
+  ok(fit.scale > 1, `크기 조절로 확대 (scale ${fit.scale.toFixed(2)})`);
+  const ptf = await page.evaluate(() => document.querySelector('#cap-preview-img').style.transform);
+  ok(ptf.includes('scale('), '미리보기에 크기(transform) 반영');
   await page.click('#btn-save-entry');
   await page.waitForSelector('#scr-cal:not(.hidden)');
   const gal = (await page.evaluate(() => window.__diary.getEntries())).find((e) => e.date === '2026-05-11');
-  ok(gal && gal.kind === 'photo' && gal.blobSize > 100, '갤러리 사진이 그날에 저장');
+  ok(gal && gal.kind === 'photo' && gal.blobSize > 100, '갤러리 사진 저장');
+  ok(gal.filter === 'mono', '저장된 사진에 선택한 필터 반영');
+  ok(gal.fit && gal.fit.scale > 1, '저장된 사진에 크기 조절값 반영');
 
   console.log('\n[18] 소리 — 새 배경음악 2종 + 효과음(비눗방울·마이크·종이넘김)');
   ok(await page.evaluate(() => window.__diary.bgmSample('guitar')) > 0.0005, '따뜻한 기타 실제 소리');
@@ -447,12 +464,12 @@ function ok(cond, name) {
   await page.click('#cal-title'); // 포커스 아웃
   await page.waitForTimeout(120);
   ok((await page.evaluate((id) => window.__diary.getEntries().find((e) => e.id === id).text, firstId)) === '인라인으로 고친 메모', '글씨 인라인 수정 저장');
-  // 사진 바꾸기 → 수정 모드 진입
-  if (await page.$(`#cal-entry-list .big-entry[data-id="${firstId}"] .be-editphoto`)) {
-    await page.click(`#cal-entry-list .big-entry[data-id="${firstId}"] .be-editphoto`);
-    ok(await page.isVisible('#scr-capture') && await page.isVisible('#cap-edit-banner'), '사진 바꾸기 → 수정 모드(카메라)');
-    await page.click('#btn-cap-back');
-  } else { ok(true, '(대표사진 없는 카드는 사진 바꾸기 생략)'); }
+  // '수정' 버튼이 기분·날씨 줄 오른쪽(be-head)에 있고, 누르면 수정 모드
+  ok(await page.$(`#cal-entry-list .big-entry[data-id="${firstId}"] .be-head .be-editphoto`) !== null, "'수정' 버튼이 상단 우측(메타 줄)에 위치");
+  ok((await page.textContent(`#cal-entry-list .big-entry[data-id="${firstId}"] .be-editphoto`)).trim() === '수정', "버튼 이름이 '수정'");
+  await page.click(`#cal-entry-list .big-entry[data-id="${firstId}"] .be-editphoto`);
+  ok(await page.isVisible('#scr-capture') && await page.isVisible('#cap-edit-banner'), "'수정' → 수정 모드(카메라)");
+  await page.click('#btn-cap-back');
 
   console.log('\n[28] 사진 달력 + 하루 여러 장 중 대표 썸네일 선택');
   // 같은 날에 사진 2장 시드 (대표 선택은 id 기준)

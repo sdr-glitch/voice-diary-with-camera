@@ -100,6 +100,16 @@
       <div id="sticker-layer"></div>
     </div>
 
+    <!-- 사진 크기 조절 (촬영·갤러리 사진을 손가락으로 모으고 벌려 맞춤) -->
+    <div class="fit-controls hidden" id="fit-controls">
+      <span class="lbl">사진을 손가락으로 모으거나 벌려 크기를 맞춰요 (짤림 방지)</span>
+      <div class="fit-btns">
+        <button class="tbtn" id="fit-out" aria-label="작게">－</button>
+        <button class="tbtn" id="fit-in" aria-label="크게">＋</button>
+        <button class="tbtn" id="fit-reset">처음으로</button>
+      </div>
+    </div>
+
     <div class="chip-row" id="filter-row" aria-label="필터 선택">
       <button class="chip" data-filter="none">필터 없음</button>
       <button class="chip on" data-filter="vintage">빈티지</button>

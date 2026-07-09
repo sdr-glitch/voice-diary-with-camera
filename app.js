@@ -26,11 +26,13 @@ let backTo = 'scr-cal';           // 하위 화면(기록·브이로그·설정)
 
 // 촬영 상태
 let camStream = null;
+let camVideo = null;              // 라이브 비디오 엘리먼트 (사진 원본 프레임용)
 let camLoopId = 0;
 let camFilter = 'vintage';
 let camMode = 'video';            // 영상 중심 — 기본 영상 (photo | video)
-let captured = null;              // { kind, blob, thumb, filter, durMs }
+let captured = null;              // 사진:{kind,srcCanvas,_work,filter,fit} 영상:{kind,blob,thumb,filter,durMs}
 let recording = false;
+let fitState = { scale: 1, x: 0, y: 0 };  // 사진 크기/위치 조절값 (%,배율)
 let vidRec = null;                // 진행 중인 MediaRecorder (영상 토글 녹화)
 let vidChunks = [];
 let vidStream = null;
@@ -483,14 +485,19 @@ function stickersHTMLFor(e) {
   return (e.stickers || []).map((s) =>
     `<span class="stk" data-s="${s.s}" style="left:${s.x * 100}%;top:${s.y * 100}%">${s.e}</span>`).join('');
 }
+function fitStyle(e) {
+  const f = e.fit;
+  if (!f || (f.scale === 1 && !f.x && !f.y)) return '';
+  return ` style="transform:translate(${f.x}%,${f.y}%) scale(${f.scale})"`;
+}
 /** 사진·영상 블록 (폴라로이드 프레임 + 마스킹 테이프) */
 function mediaBlockHTML(e) {
   if (e.kind === 'photo' && e.blob) {
-    return `<div class="pg-media polaroid"><span class="masking-tape"></span><img src="${mediaURL(e)}" alt="일기 사진">${stickersHTMLFor(e)}<span class="media-tag">${filterLabel(e.filter)}</span></div>`;
+    return `<div class="pg-media polaroid"><span class="masking-tape"></span><img src="${mediaURL(e)}" alt="일기 사진"${fitStyle(e)}>${stickersHTMLFor(e)}<span class="media-tag">${filterLabel(e.filter)}</span></div>`;
   }
   if (e.kind === 'video' && e.blob) {
     const secs = e.durMs ? Math.max(1, Math.round(e.durMs / 1000)) + '초 ' : '';
-    return `<div class="pg-media polaroid"><span class="masking-tape"></span><video src="${mediaURL(e)}" muted loop autoplay playsinline></video>${stickersHTMLFor(e)}<span class="media-tag">영상 ${secs}· ${filterLabel(e.filter)}</span></div>`;
+    return `<div class="pg-media polaroid"><span class="masking-tape"></span><video src="${mediaURL(e)}" muted loop autoplay playsinline${fitStyle(e)}></video>${stickersHTMLFor(e)}<span class="media-tag">영상 ${secs}· ${filterLabel(e.filter)}</span></div>`;
   }
   return '';
 }
@@ -504,9 +511,11 @@ function bigEntryHTML(e) {
     ? `<label class="pg-cover"><input type="checkbox" class="cover-chk" data-id="${e.id}" data-date="${e.date}" ${isCover(e) ? 'checked' : ''}> 이 날의 대표 사진(달력 썸네일)으로</label>`
     : '';
   return `<article class="big-entry" id="big-${e.id}" data-id="${e.id}">
-    ${meta ? `<div class="pg-meta">${meta}</div>` : ''}
+    <div class="be-head">
+      <div class="pg-meta">${meta}</div>
+      <button class="tbtn be-editphoto" data-id="${e.id}">수정</button>
+    </div>
     ${mediaBlockHTML(e)}
-    ${e.thumb ? `<button class="tbtn be-editphoto" data-id="${e.id}">사진 바꾸기</button>` : ''}
     ${coverPick}
     <textarea class="be-text" data-id="${e.id}" rows="3" placeholder="메모를 입력하세요…">${escapeHTML(e.text || '')}</textarea>
     <div class="be-actions"><button class="tbtn danger be-del" data-id="${e.id}">이 기록 지우기</button></div>
@@ -733,6 +742,7 @@ function prefillEdit() {
   camFilter = e.filter || 'vintage';
   $$('#filter-row .chip').forEach((x) => x.classList.toggle('on', x.dataset.filter === camFilter));
   if (e.author) { activeAuthor = e.author; renderAuthorChips(); }
+  fitState = e.fit ? { ...e.fit } : { scale: 1, x: 0, y: 0 };  // 기존 크기조절 이어받기
 }
 
 async function openCapture() {
@@ -755,6 +765,7 @@ async function openCapture() {
   }
   $('#btn-shutter').disabled = false;
   const video = document.createElement('video');
+  camVideo = video;
   video.srcObject = camStream;
   video.muted = true; video.playsInline = true;
   await video.play();
@@ -767,9 +778,59 @@ async function openCapture() {
   (function loop() {
     if (myLoop !== camLoopId || !camStream) return;
     // 촬영 완료(미리보기) 전까지는 계속 그린다 — 영상 녹화 중에도 캔버스가 갱신돼야 녹화가 담김
-    if (!(captured && captured.blob)) drawFiltered(ctx, video, w, h, camFilter);
+    if (!(captured && (captured.blob || captured._work))) drawFiltered(ctx, video, w, h, camFilter);
     requestAnimationFrame(loop);
   })();
+}
+
+/** 캡처된 사진(원본 srcCanvas)에 현재 필터를 적용해 미리보기 갱신 */
+function renderCapturedPhoto() {
+  if (!captured || !captured.srcCanvas) return;
+  const s = captured.srcCanvas, w = s.width, h = s.height;
+  const work = document.createElement('canvas'); work.width = w; work.height = h;
+  const wc = work.getContext('2d', { willReadFrequently: true });
+  drawFiltered(wc, s, w, h, captured.filter);
+  captured._work = work;
+  const img = $('#cap-preview-img');
+  img.src = work.toDataURL('image/jpeg', 0.92);
+  applyFitPreview();
+}
+function applyFitPreview() {
+  const img = $('#cap-preview-img');
+  img.style.transform = `translate(${fitState.x}%, ${fitState.y}%) scale(${fitState.scale})`;
+}
+/** 사진 미리보기 핀치 줌 + 한 손가락 이동 */
+function bindPhotoPinch() {
+  const stage = document.querySelector('.cam-stage');
+  const pts = new Map();
+  let startDist = 0, startScale = 1, startX = 0, startY = 0, startMid = null;
+  const editingPhoto = () => captured && captured.kind === 'photo' && !$('#cap-preview-img').classList.contains('hidden');
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  stage.addEventListener('pointerdown', (e) => {
+    if (!editingPhoto()) return;
+    if (e.target.closest('.stk')) return;  // 스티커 드래그는 스티커가 처리
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 1) { startX = fitState.x; startY = fitState.y; startMid = { x: e.clientX, y: e.clientY }; }
+    if (pts.size === 2) { const a = [...pts.values()]; startDist = dist(a[0], a[1]) || 1; startScale = fitState.scale; }
+    try { stage.setPointerCapture(e.pointerId); } catch (er) {}
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!editingPhoto() || !pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const r = stage.getBoundingClientRect();
+    if (pts.size >= 2) {
+      const a = [...pts.values()];
+      fitState.scale = Math.min(4, Math.max(0.3, startScale * (dist(a[0], a[1]) / startDist)));
+    } else if (startMid) {
+      fitState.x = startX + (e.clientX - startMid.x) / r.width * 100;
+      fitState.y = startY + (e.clientY - startMid.y) / r.height * 100;
+    }
+    applyFitPreview();
+    e.preventDefault();
+  }, { passive: false });
+  const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) startMid = null; };
+  stage.addEventListener('pointerup', up);
+  stage.addEventListener('pointercancel', up);
 }
 
 function stopCamera() {
@@ -788,14 +849,17 @@ function stopCamera() {
 function resetCaptureUI() {
   captured = null;
   recording = false;
+  fitState = { scale: 1, x: 0, y: 0 };
   clearStickers();
   $('#cap-preview-img').classList.add('hidden');
+  $('#cap-preview-img').style.transform = '';
   $('#cap-preview-video').classList.add('hidden');
   $('#cam-canvas').classList.remove('hidden');
   $('#btn-retake').classList.add('hidden');
   $('#btn-shutter').classList.remove('hidden');
   $('#btn-shutter').classList.remove('recording');
   $('#rec-dot').classList.remove('on');
+  $('#fit-controls').classList.add('hidden');
   $('#diary-text').value = '';
   $('#voice-status').textContent = '';
   $$('.wchip').forEach((b) => b.classList.remove('on'));
@@ -819,13 +883,16 @@ function pickMime() {
 /** 셔터 버튼: 사진이면 즉시 촬영, 영상이면 녹화 시작/정지 토글(길이 제한 없음) */
 async function shutter() {
   if (!camStream) return;
-  if (captured && captured.blob) return; // 이미 촬영 완료(미리보기 중)
-  const cv = $('#cam-canvas');
+  if (captured && (captured.blob || captured._work)) return; // 이미 촬영 완료(미리보기 중)
   if (camMode === 'photo') {
     playFx('shutter');
-    const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.92));
-    captured = { kind: 'photo', blob, thumb: thumbFrom(cv), filter: camFilter };
-    $('#cap-preview-img').src = URL.createObjectURL(blob);
+    // 원본 프레임을 srcCanvas에 보관 → 촬영 후에도 필터를 바꿔 다시 적용 가능
+    const w = camVideo.videoWidth || 640, h = camVideo.videoHeight || 480;
+    const src = document.createElement('canvas'); src.width = w; src.height = h;
+    src.getContext('2d').drawImage(camVideo, 0, 0, w, h);
+    fitState = { scale: 1, x: 0, y: 0 };
+    captured = { kind: 'photo', srcCanvas: src, filter: camFilter, fit: fitState };
+    renderCapturedPhoto();
     $('#cap-preview-img').classList.remove('hidden');
     $('#cam-canvas').classList.add('hidden');
     afterCapture();
@@ -886,21 +953,26 @@ function afterCapture() {
   $('#btn-retake').classList.remove('hidden');
   $('#deco-box').classList.remove('hidden');
   document.querySelector('.cam-stage').classList.add('decorating');
+  // 사진일 때만 크기 조절(핀치/버튼) 노출
+  $('#fit-controls').classList.toggle('hidden', !(captured && captured.kind === 'photo'));
   toast(captured && captured.kind === 'photo'
-    ? '찰칵! 스티커로 꾸미거나 아래에 느낌을 남겨보세요.'
+    ? '찰칵! 손가락으로 사진 크기를 맞추고, 스티커로 꾸며보세요.'
     : '순간을 담았어요. 스티커로 꾸며보세요.');
 }
 function retake() {
-  const img = $('#cap-preview-img'), pv = $('#cap-preview-video');
-  if (img.src) URL.revokeObjectURL(img.src);
+  const pv = $('#cap-preview-video');
   if (pv.src) URL.revokeObjectURL(pv.src);
-  img.classList.add('hidden'); pv.classList.add('hidden'); pv.removeAttribute('src');
+  $('#cap-preview-img').classList.add('hidden');
+  $('#cap-preview-img').style.transform = '';
+  pv.classList.add('hidden'); pv.removeAttribute('src');
   captured = null;
+  fitState = { scale: 1, x: 0, y: 0 };
   clearStickers();
   $('#cam-canvas').classList.remove('hidden');
   $('#btn-shutter').classList.remove('hidden');
   $('#btn-shutter').classList.remove('recording');
   $('#btn-retake').classList.add('hidden');
+  $('#fit-controls').classList.add('hidden');
 }
 
 /* ==================== 갤러리에서 가져오기 (지난 날 채우기) ==================== */
@@ -926,13 +998,13 @@ async function importFromGallery(file) {
     } else if (file.type.startsWith('image/')) {
       const img = await blobToImage(file);
       const w = img.naturalWidth || 640, h = img.naturalHeight || 480;
-      const oc = document.createElement('canvas'); oc.width = w; oc.height = h;
-      const octx = oc.getContext('2d', { willReadFrequently: true });
-      drawFiltered(octx, img, w, h, camFilter); // 선택한 필터 적용
+      // 원본을 srcCanvas에 보관 → 필터를 바꿔가며 다시 적용 + 크기조절 가능
+      const src = document.createElement('canvas'); src.width = w; src.height = h;
+      src.getContext('2d').drawImage(img, 0, 0, w, h);
       URL.revokeObjectURL(img.src);
-      const blob = await new Promise((r) => oc.toBlob(r, 'image/jpeg', 0.92));
-      captured = { kind: 'photo', blob, thumb: thumbFrom(oc), filter: camFilter };
-      $('#cap-preview-img').src = URL.createObjectURL(blob);
+      fitState = { scale: 1, x: 0, y: 0 };
+      captured = { kind: 'photo', srcCanvas: src, filter: camFilter, fit: fitState };
+      renderCapturedPhoto();
       $('#cap-preview-img').classList.remove('hidden');
       $('#cam-canvas').classList.add('hidden');
       afterCapture();
@@ -966,7 +1038,7 @@ function renderStickerLayer() {
   $('#deco-controls').classList.toggle('hidden', selSticker < 0);
 }
 function addSticker(emoji) {
-  if (!captured || !captured.blob) { toast('먼저 사진이나 영상을 찍은 다음 꾸밀 수 있어요.'); return; }
+  if (!captured || !(captured.blob || captured._work)) { toast('먼저 사진이나 영상을 찍은 다음 꾸밀 수 있어요.'); return; }
   capStickers.push({ e: emoji, x: 0.5, y: 0.5, s: 0.16 });
   selSticker = capStickers.length - 1;
   renderStickerLayer();
@@ -1067,22 +1139,35 @@ function stopSpeech() {
 }
 function toggleSpeech() { speechOn ? stopSpeech() : startSpeech(); }
 
+/** 캡처된 미디어를 최종 blob/thumb/fit으로 확정 (사진은 필터 적용된 _work에서 생성) */
+async function finalizeCaptured() {
+  if (!captured) return null;
+  if (captured.kind === 'photo' && captured._work) {
+    const blob = await new Promise((r) => captured._work.toBlob(r, 'image/jpeg', 0.92));
+    return { kind: 'photo', blob, thumb: thumbFrom(captured._work), filter: captured.filter, durMs: 0, fit: { ...fitState } };
+  }
+  if (captured.kind === 'video' && captured.blob) {
+    return { kind: 'video', blob: captured.blob, thumb: captured.thumb, filter: captured.filter, durMs: captured.durMs || 0, fit: { scale: 1, x: 0, y: 0 } };
+  }
+  return null;
+}
+
 /* ==================== 저장 ==================== */
 async function saveEntry() {
   const text = $('#diary-text').value.trim();
-  const hasMedia = captured && captured.blob;
   if (recording) { toast('녹화를 먼저 멈춰주세요. 셔터 버튼을 한 번 더 누르면 멈춰요.'); return null; }
   const weatherBtn = $('.wchip.on');
   const moodBtn = $('.mchip.on');
+  const media = await finalizeCaptured();
 
   // 수정 모드 — 기존 기록 갱신 (미디어는 새로 찍었을 때만 교체)
   if (editId) {
     const e = entries.find((x) => x.id === editId);
     if (e) {
-      if (hasMedia) {
+      if (media) {
         const u = mediaURLCache.get(e.id); if (u) { URL.revokeObjectURL(u); mediaURLCache.delete(e.id); }
-        e.kind = captured.kind; e.blob = captured.blob; e.thumb = captured.thumb;
-        e.filter = captured.filter; e.durMs = captured.durMs || 0; e.stickers = capStickers.slice();
+        e.kind = media.kind; e.blob = media.blob; e.thumb = media.thumb;
+        e.filter = media.filter; e.durMs = media.durMs; e.fit = media.fit; e.stickers = capStickers.slice();
       }
       e.text = text;
       e.weather = weatherBtn ? weatherBtn.dataset.weather : '';
@@ -1100,7 +1185,7 @@ async function saveEntry() {
     editId = null;
   }
 
-  if (!hasMedia && !text) {
+  if (!media && !text) {
     toast('사진·영상을 찍거나, 한 줄이라도 느낌을 남겨보세요.');
     return null;
   }
@@ -1108,15 +1193,16 @@ async function saveEntry() {
     id: uid(),
     date: captureDate || todayStr(),
     ts: Date.now(),
-    kind: hasMedia ? captured.kind : 'none',
-    blob: hasMedia ? captured.blob : null,
-    thumb: hasMedia ? captured.thumb : null,
-    filter: hasMedia ? captured.filter : 'none',
-    durMs: hasMedia && captured.durMs ? captured.durMs : 0,
+    kind: media ? media.kind : 'none',
+    blob: media ? media.blob : null,
+    thumb: media ? media.thumb : null,
+    filter: media ? media.filter : 'none',
+    durMs: media ? media.durMs : 0,
+    fit: media ? media.fit : { scale: 1, x: 0, y: 0 },
     weather: weatherBtn ? weatherBtn.dataset.weather : '',
     mood: moodBtn ? moodBtn.dataset.mood : '',
     author: activeAuthor || (loadMembers()[0] ? loadMembers()[0].id : ''),
-    stickers: hasMedia ? capStickers.slice() : [],
+    stickers: media ? capStickers.slice() : [],
     text,
   };
   await dbPut(entry);
@@ -1245,13 +1331,15 @@ function drawPolaroidFrame(ctx, W, H, g) {
   ctx.fillRect(g.mx, g.my, g.mw, g.mh);
 }
 /** 미디어를 폴라로이드 안쪽에 cover-fit (zoom>1 이면 켄번즈 확대) */
-function drawMediaCover(ctx, src, sw, sh, g, zoom) {
+function drawMediaCover(ctx, src, sw, sh, g, zoom, fit) {
   zoom = zoom || 1;
+  const f = fit || { scale: 1, x: 0, y: 0 };
   ctx.save();
   ctx.beginPath(); ctx.rect(g.mx, g.my, g.mw, g.mh); ctx.clip();
-  const base = Math.max(g.mw / sw, g.mh / sh) * zoom;
+  const base = Math.max(g.mw / sw, g.mh / sh) * zoom * (f.scale || 1);
   const dw = sw * base, dh = sh * base;
-  ctx.drawImage(src, g.mx + (g.mw - dw) / 2, g.my + (g.mh - dh) / 2, dw, dh);
+  const ox = (f.x || 0) / 100 * g.mw, oy = (f.y || 0) / 100 * g.mh;
+  ctx.drawImage(src, g.mx + (g.mw - dw) / 2 + ox, g.my + (g.mh - dh) / 2 + oy, dw, dh);
   ctx.restore();
 }
 function polaroidStickers(ctx, g, e) {
@@ -1420,7 +1508,7 @@ async function buildVlog(ym, onProg = () => {}, opts = {}) {
         drawFn = () => {
           const p = Math.min(1, (now() - sceneStart) / slotMs);
           drawPolaroidFrame(ctx, W, H, geo);
-          drawMediaCover(ctx, img, img.naturalWidth || 4, img.naturalHeight || 3, geo, 1 + 0.09 * p);
+          drawMediaCover(ctx, img, img.naturalWidth || 4, img.naturalHeight || 3, geo, 1 + 0.09 * p, e.fit);
           polaroidStickers(ctx, geo, e); polaroidCaption(ctx, geo, e);
         };
         await sleep(slotMs);
@@ -2176,6 +2264,11 @@ function bind() {
       $$('#filter-row .chip').forEach((x) => x.classList.remove('on'));
       b.classList.add('on');
       camFilter = b.dataset.filter;
+      // 이미 찍은/가져온 사진이면 필터를 즉시 다시 적용 (갤러리 사진도 필터 반영)
+      if (captured && captured.kind === 'photo' && captured.srcCanvas) {
+        captured.filter = camFilter;
+        renderCapturedPhoto();
+      }
     };
   });
   $$('#mode-toggle button').forEach((b) => {
@@ -2290,6 +2383,13 @@ function bind() {
   $('#btn-vlog-keep').onclick = saveVlogToLib;
   $('#btn-vlog-save').onclick = downloadVlog;
   $('#btn-wipe').onclick = wipeAll;
+
+  // 사진 크기 조절 (버튼 + 핀치)
+  const setScale = (mul) => { fitState.scale = Math.min(4, Math.max(0.3, fitState.scale * mul)); applyFitPreview(); };
+  $('#fit-in').onclick = () => setScale(1.15);
+  $('#fit-out').onclick = () => setScale(1 / 1.15);
+  $('#fit-reset').onclick = () => { fitState = { scale: 1, x: 0, y: 0 }; applyFitPreview(); };
+  bindPhotoPinch();
 
   // 갤러리에서 가져오기 (지난 날 채우기)
   $('#btn-gallery').onclick = () => $('#gallery-input').click();
@@ -2422,7 +2522,10 @@ window.__diary = {
 
   buildVlog,
   speechSupported,
-  camState: () => ({ hasStream: !!camStream, filter: camFilter, mode: camMode, recording, captured: (captured && captured.blob) ? captured.kind : null }),
+  camState: () => ({ hasStream: !!camStream, filter: camFilter, mode: camMode, recording, captured: (captured && (captured.blob || captured._work)) ? captured.kind : null }),
+  // 사진 크기조절 훅
+  getFit: () => ({ ...fitState }),
+  setFit: (s, x, y) => { fitState = { scale: s, x: x || 0, y: y || 0 }; applyFitPreview(); },
   // 시드용: dataURL을 blob으로 바꿔 엔트리 저장
   async addEntry({ date, text = '', weather = '', mood = '', filter = 'none', kind = 'none', dataURL = null, stickers = [], durMs = 0, author = '' }) {
     let blob = null, thumb = null;
