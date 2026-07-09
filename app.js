@@ -53,6 +53,7 @@ let userAudioName = '';
 let captureDate = null;   // 기록 중인 날짜(YYYY-MM-DD) — 달력에서 지난 날 채우기 지원
 let reminderTimer = 0;    // 알림 예약 타이머
 let gridFilterMood = '';  // 모아보기 기분 필터
+let selDate = '';         // 달력에서 선택한 날짜 (아래 목록에 표시)
 const DEFAULT_OUTRO = '이번 달도 수고했어';
 const APP_NAME = '순간일기';
 
@@ -1546,21 +1547,40 @@ function setJiggle(on) {
     ? '위아래로 쓸면 사진이 와르르 · 다시 길게 누르면 정리돼요'
     : '길게 눌러 편집 · 위아래로 쓸면 와르르';
 }
+let gridFallen = false;
+/** 편집 중 스와이프 → 사진이 화면 아래로 떨어져 쌓임(그대로 멈춤). 복구는 길게 누르기 */
 function cascadeGrid() {
-  if (cascading || !gridJiggle) return;
+  if (cascading || !gridJiggle || gridFallen) return;
   cascading = true;
+  const wrap = $('#grid-wrap');
+  wrap.classList.remove('jiggle');        // 떨어지는 동안 흔들림 멈춤
   const items = $$('#grid-wrap .grid-item');
+  const vh = window.innerHeight;
   items.forEach((el, k) => {
-    el.style.setProperty('--fd', (k * 45) + 'ms');
-    el.style.setProperty('--fx', (((k * 7) % 13) - 6) * 5 + 'px');
-    el.style.setProperty('--fr', ((k % 2 ? 1 : -1) * (12 + (k * 9) % 26)) + 'deg');
+    const r = el.getBoundingClientRect();
+    // 바닥 근처에 살짝 층지게 쌓이도록 목표 이동량 계산
+    const restBottom = vh - 96 - (k % 5) * 7;
+    const ty = Math.max(0, restBottom - r.bottom);
+    el.style.setProperty('--ty', ty + 'px');
+    el.style.setProperty('--fx', ((((k * 13) % 17) - 8) * 5) + 'px');
+    el.style.setProperty('--fr', ((k % 2 ? 1 : -1) * (8 + (k * 11) % 22)) + 'deg');
+    el.style.setProperty('--fd', (k * 40) + 'ms');
+    el.style.zIndex = String(10 + k);
     el.classList.add('falling');
   });
   playFx('flip');
   setTimeout(() => {
     cascading = false;
-    renderGrid();           // 다시 제자리로 (여전히 편집 모드면 흔들림 유지)
-  }, 1150);
+    gridFallen = true;
+    $('#grid-hint').textContent = '화면을 길게 누르면 다시 제자리로 정리돼요';
+  }, 900);
+}
+/** 쌓인 사진을 원래대로 (길게 누르기로 호출) */
+function restoreGrid() {
+  gridFallen = false;
+  gridJiggle = false;
+  renderGrid();
+  $('#grid-hint').textContent = '길게 눌러 편집 · 위아래로 쓸면 와르르';
 }
 /** 그리드 제스처: 길게 누르면 흔들림(편집) 토글, 편집 중 위아래로 쓸면 와르르 */
 function bindGrid() {
@@ -1569,7 +1589,11 @@ function bindGrid() {
   gw.addEventListener('pointerdown', (e) => {
     startY = e.clientY;
     clearTimeout(lpTimer);
-    lpTimer = setTimeout(() => { setJiggle(); suppressClick = true; }, 450);
+    lpTimer = setTimeout(() => {
+      if (gridFallen) restoreGrid();   // 쌓여 있으면 → 원래대로
+      else setJiggle();                // 아니면 편집 토글
+      suppressClick = true;
+    }, 450);
   });
   gw.addEventListener('pointermove', (e) => {
     if (Math.abs(e.clientY - startY) > 12) clearTimeout(lpTimer);
@@ -1665,6 +1689,14 @@ function renderCal() {
   entries.forEach((e, i) => {
     if (e.date.slice(0, 7) === calYM && !firstIdxByDay.has(e.date)) firstIdxByDay.set(e.date, i);
   });
+  // 선택 날짜 기본값 — 보고 있는 달의 오늘(있으면) 또는 가장 최근 기록일
+  if (!selDate || selDate.slice(0, 7) !== calYM) {
+    if (today.slice(0, 7) === calYM && firstIdxByDay.has(today)) selDate = today;
+    else {
+      const withDays = Array.from(firstIdxByDay.keys()).sort();
+      selDate = withDays.length ? withDays[withDays.length - 1] : '';
+    }
+  }
   let html = DOW.map((d) => `<span class="cal-dow">${d}</span>`).join('');
   for (let i = 0; i < startDow; i++) html += '<span></span>';
   for (let d = 1; d <= days; d++) {
@@ -1672,33 +1704,39 @@ function renderCal() {
     const idx = firstIdxByDay.get(ds);
     const isToday = ds === today;
     const isFuture = ds > today;
-    const tcls = isToday ? ' today' : '';
+    const cls = (isToday ? ' today' : '') + (ds === selDate ? ' sel' : '');
     if (idx !== undefined) {
       // 기록 있는 날 — 대표 사진이 있으면 썸네일 셀, 없으면(글만) 점 셀
       const cov = coverEntry(ds);
       if (cov && cov.thumb) {
-        html += `<button class="cal-day has thumb${tcls}" data-idx="${idx}" style="background-image:url('${cov.thumb}')"><span class="cal-num">${d}</span></button>`;
+        html += `<button class="cal-day has thumb${cls}" data-date="${ds}" style="background-image:url('${cov.thumb}')"><span class="cal-num">${d}</span></button>`;
       } else {
-        html += `<button class="cal-day has${tcls}" data-idx="${idx}">${d}<i></i></button>`;
+        html += `<button class="cal-day has${cls}" data-date="${ds}">${d}<i></i></button>`;
       }
     } else if (isFuture) {
       html += `<span class="cal-day future">${d}</span>`;
     } else {
-      html += `<button class="cal-day empty${tcls}" data-date="${ds}">${d}</button>`;
+      html += `<button class="cal-day empty${cls}" data-date="${ds}">${d}</button>`;
     }
   }
   $('#cal-grid').innerHTML = html;
   renderCalEntryList();
 }
 
-/** 달력 아래 — 그달 일기 목록 (누르면 크게 보기) */
+/** 달력 아래 — 선택한 날짜의 일기만 (누르면 크게 보기) */
 function renderCalEntryList() {
   const wrap = $('#cal-entry-list');
+  if (!selDate) { wrap.innerHTML = '<p class="empty-note sm">날짜를 눌러 그날의 일기를 보세요.</p>'; return; }
   const list = entries.map((e, i) => ({ e, i }))
-    .filter(({ e }) => e.date.slice(0, 7) === calYM)
-    .sort((a, b) => (a.e.date === b.e.date ? b.e.ts - a.e.ts : (a.e.date < b.e.date ? 1 : -1)));
-  if (!list.length) { wrap.innerHTML = '<p class="empty-note sm">이 달엔 아직 기록이 없어요.</p>'; return; }
-  wrap.innerHTML = list.map(({ e, i }) => {
+    .filter(({ e }) => e.date === selDate)
+    .sort((a, b) => b.e.ts - a.e.ts);
+  const d = parseDate(selDate);
+  const head = `<p class="entry-list-head">${d.getMonth() + 1}월 ${d.getDate()}일 ${DOW[d.getDay()]}요일 · ${list.length}개</p>`;
+  if (!list.length) {
+    wrap.innerHTML = head + '<p class="empty-note sm">이 날엔 아직 기록이 없어요. 날짜를 눌러 채워보세요.</p>';
+    return;
+  }
+  wrap.innerHTML = head + list.map(({ e, i }) => {
     const d = parseDate(e.date);
     const thumb = e.thumb
       ? `<img src="${e.thumb}" alt="">${e.kind === 'video' ? '<span class="li-vtag">▶</span>' : ''}`
@@ -1803,11 +1841,16 @@ function bind() {
   $('#cal-next').onclick = () => shiftCalMonth(1);
   $('#cal-grid').addEventListener('click', (e) => {
     const day = e.target.closest('.cal-day');
-    if (!day) return;
-    if (day.dataset.date) { openCaptureFor(day.dataset.date); return; } // 지난 날/오늘 채우기
-    if (day.classList.contains('has')) jumpToEntry(Number(day.dataset.idx));
+    if (!day || !day.dataset.date) return;
+    if (day.classList.contains('has')) {
+      // 기록 있는 날 → 선택해서 아래 목록에 그날 일기만 표시
+      selDate = day.dataset.date;
+      renderCal();
+    } else {
+      openCaptureFor(day.dataset.date); // 빈 날 → 그날 채우기
+    }
   });
-  // 달력 아래 일기 목록 → 크게 보기
+  // 달력 아래 (선택 날짜) 일기 목록 → 크게 보기
   $('#cal-entry-list').addEventListener('click', (e) => {
     const li = e.target.closest('.entry-li');
     if (li) jumpToEntry(Number(li.dataset.idx));
@@ -2067,8 +2110,9 @@ window.__diary = {
   },
   reminder: { on: remindOn, time: remindTime, show: showReminderBanner, schedule: scheduleReminder },
   // 모아보기·통계·브이로그 보관함 훅
-  setJiggle, isJiggling: () => gridJiggle, cascadeGrid,
+  setJiggle, isJiggling: () => gridJiggle, cascadeGrid, restoreGrid, isFallen: () => gridFallen,
   gridCount: () => $$('#grid-wrap .grid-item').length,
+  selectDate: (d) => { selDate = d; renderCal(); }, getSelDate: () => selDate,
   statsCounts: (ym) => { statsYM = ym; renderMoodStats();
     const c = {}; MOODS.forEach((k) => (c[k] = 0));
     entries.filter((e) => e.date.startsWith(ym)).forEach((e) => { if (c[e.mood] !== undefined) c[e.mood]++; });

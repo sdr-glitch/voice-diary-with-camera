@@ -45,9 +45,9 @@
 - **필터 8종**: none·vintage·colorpop·fisheye·film·retro(폴더폰: 저해상도 픽셀화+초록 LCD+스캔라인)·mono·dreamy. `CSS_FILTER`(ctx.filter)+수동 오버레이, retro는 축소→확대 픽셀화.
 - **날짜 채우기**: `captureDate`가 기록 대상 날짜. `openCaptureFor(date)`로 달력의 지난 날/오늘 진입. 갤러리 가져오기 `importFromGallery(file)`(사진은 필터 적용, 영상은 원본+메타 durMs).
 - **브이로그 폴라로이드**: `polaroidGeom/drawPolaroidFrame/drawMediaCover(zoom)/polaroidStickers/polaroidCaption`. 사진은 켄번즈(zoom 1→1.09), 영상은 그대로. 아웃트로는 `opts.outro`(수정·저장, 기본 `DEFAULT_OUTRO`) + `APP_NAME` 고정 소자막. **브이로그는 사진·영상만**(글만 있는 날 제외 — `buildClipList`/`buildVlog`에서 필터).
-- **모아보기**(`renderGrid`): 최신순 격자, `gridFilterMood`로 기분 필터. `bindGrid()` — 롱프레스(450ms) `setJiggle` 토글, 편집 중 위아래 스와이프(>45px) `cascadeGrid`. **편집 중엔 `touchmove`를 비-passive로 `preventDefault`해 스크롤 대신 와르르**(스크롤 충돌 해결). 탭 시 `jumpToEntry`.
+- **모아보기**(`renderGrid`): 최신순 격자, `gridFilterMood`로 기분 필터. `bindGrid()` — 롱프레스(450ms): 쌓인 상태면 `restoreGrid`, 아니면 `setJiggle` 토글. 편집 중 위아래 스와이프(>45px) `cascadeGrid`. **편집 중엔 `touchmove`를 비-passive로 `preventDefault`해 스크롤 대신 와르르**. **와르르는 `getBoundingClientRect`로 화면 바닥 근처 목표(`--ty`)를 계산해 떨어져 쌓인 뒤 그대로 멈춤(`gridFallen`)**, 복구는 길게 누르기. 탭 시 `jumpToEntry`.
 - **크게 보기**(scr-book): 2쪽 스프레드 폐지 → **한 화면에 일기 하나 크게**(`step()=1`, `#page-right`만). 그날 미디어 2개+면 `pg-cover` 체크박스로 대표 사진 선택.
-- **사진 달력**: `renderCal`이 `coverEntry(date)`(선택값 우선/없으면 첫 미디어)의 thumb로 셀 배경. 영상 thumb=첫 프레임 정지컷. 아래 `renderCalEntryList`(그달 목록→크게 보기).
+- **사진 달력**: `renderCal`이 `coverEntry(date)`(선택값 우선/없으면 첫 미디어)의 thumb로 셀 배경. 영상 thumb=첫 프레임 정지컷. 날짜를 누르면 `selDate` 선택(강조 `.sel`)만 하고 `renderCalEntryList`가 **그 날짜의 일기만** 아래에 표시(목록 항목 클릭 → 크게 보기). `selDate` 기본값=보고 있는 달의 오늘 또는 최근 기록일.
 - **기분 통계**(`renderMoodStats`): 월별 `MOODS` 분포 막대(버튼→`openMoodCollection` 모아보기)+최다 기분 요약+`MOOD_CARD`(공감/위로/응원). `statsYM` 상태.
 - **대표 사진**: `momentDiary:covers`(date→entryId) localStorage. `setCover`/`coverEntry`/`isCover`.
 - **브이로그 보관함**: IndexedDB `vlogs` 스토어(DB v2). `saveVlogToLib`(생성 후 `#btn-vlog-keep`), `renderVlogLib` 카드(재생=인라인 video/저장/삭제), `VLOG_CAP`개 초과 시 오래된 것 정리.

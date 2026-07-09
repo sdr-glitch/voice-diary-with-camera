@@ -164,9 +164,14 @@ function ok(cond, name) {
   ok(await page.isVisible('#scr-cal'), '달력 홈으로');
   ok((await page.textContent('#cal-title')).includes('2026년 6월'), '6월 표시');
   ok((await page.$$eval('.cal-day.has', (b) => b.length)) === 3, '기록 있는 날 3개');
-  await page.click('.cal-day.has'); // 6월 3일
+  // 날짜를 누르면 아래에 그날 일기만 뜨고, 목록을 눌러 크게 보기
+  await page.click('.cal-day.has[data-date="2026-06-03"]');
+  await page.waitForTimeout(120);
+  ok((await page.textContent('#cal-entry-list')).includes('유월 첫 기록'), '선택한 날짜(6/3) 일기만 목록에 표시');
+  ok(!(await page.textContent('#cal-entry-list')).includes('유월 셋째'), '다른 날짜 일기는 목록에 없음');
+  await page.click('#cal-entry-list .entry-li');
   await page.waitForSelector('#scr-book:not(.hidden)');
-  ok((await page.textContent('#page-left, #page-right')).includes('유월 첫 기록'), '해당 날짜 페이지로 점프');
+  ok((await page.textContent('#page-right')).includes('유월 첫 기록'), '목록 클릭 → 그 일기 크게 보기');
   await page.evaluate(() => window.__diary.goCalendar('2026-06'));
   await page.click('#cal-next');
   ok((await page.textContent('#cal-title')).includes('2026년 7월'), '달력 월 넘김');
@@ -371,13 +376,16 @@ function ok(cond, name) {
   await page.evaluate(() => window.__diary.setJiggle(true));
   ok(await page.evaluate(() => window.__diary.isJiggling()), '흔들림(편집) 모드 켜짐');
   ok(await page.evaluate(() => document.querySelector('#grid-wrap').classList.contains('jiggle')), '그리드에 흔들림 클래스');
-  // 와르르 (편집 모드에서만)
+  // 와르르 (편집 모드에서만) — 떨어져 쌓인 뒤 그대로 멈춤
   await page.evaluate(() => window.__diary.cascadeGrid());
   ok(await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length) > 0, '와르르 떨어지는 애니메이션 적용');
-  await page.waitForTimeout(1250);
-  ok(await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length) === 0, '애니메이션 후 제자리로 복구');
-  await page.evaluate(() => window.__diary.setJiggle(false));
-  ok(!(await page.evaluate(() => window.__diary.isJiggling())), '다시 길게 누르면(토글) 정리됨');
+  await page.waitForTimeout(1000);
+  ok(await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length) > 0, '떨어진 뒤 사라지지 않고 아래에 쌓여 멈춤');
+  ok(await page.evaluate(() => window.__diary.isFallen()), '쌓임 상태 유지');
+  // 길게 누르기(복구 훅) → 원래대로
+  await page.evaluate(() => window.__diary.restoreGrid());
+  ok(await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length) === 0, '길게 누르면 원래대로 정리');
+  ok(!(await page.evaluate(() => window.__diary.isJiggling())) && !(await page.evaluate(() => window.__diary.isFallen())), '복구 후 편집·쌓임 해제');
 
   console.log('\n[24] 기분 통계');
   // 7월에 기분 몇 개 시드
@@ -475,12 +483,15 @@ function ok(cond, name) {
   await page.click('#grid-filter-clear');
   ok(await page.evaluate(() => window.__diary.gridFilter()) === '', '전체 보기로 해제');
 
-  console.log('\n[30] 편집 모드 와르르(스크롤 아닌 애니메이션)');
+  console.log('\n[30] 편집 모드 와르르 → 아래 쌓임 유지 → 길게 눌러 복구');
   await page.evaluate(() => window.__diary.show('scr-grid'));
   await page.evaluate(() => window.__diary.setJiggle(true));
   await page.evaluate(() => window.__diary.cascadeGrid());
-  ok((await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length)) > 0, '와르르 낙하 애니메이션 작동');
-  await page.evaluate(() => window.__diary.setJiggle(false));
+  await page.waitForTimeout(950);
+  ok((await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length)) > 0 &&
+     await page.evaluate(() => window.__diary.isFallen()), '떨어진 사진이 아래에 쌓인 채 멈춤');
+  await page.evaluate(() => window.__diary.restoreGrid());
+  ok(!(await page.evaluate(() => window.__diary.isFallen())), '길게 누르면 복구');
 
   console.log('\n[31] PWA 구성');
   const root = path.resolve(__dirname, '..');

@@ -727,14 +727,15 @@ button.cal-day.empty:hover { background: var(--paper-2); }
   animation: jiggle .32s ease-in-out infinite;
   animation-delay: var(--jd, 0s);
 }
-/* 와르르 떨어지기 */
+/* 와르르 떨어져 화면 아래에 쌓이기 (그대로 멈춤 — 복구는 길게 누르기) */
 @keyframes fall {
-  to { transform: translate(var(--fx, 0), 130vh) rotate(var(--fr, 20deg)); opacity: 0; }
+  0% { transform: translate(0, 0) rotate(0deg); }
+  60% { transform: translate(calc(var(--fx, 0px) * .7), calc(var(--ty, 70vh) + 14px)) rotate(var(--fr, 15deg)); }
+  100% { transform: translate(var(--fx, 0px), var(--ty, 70vh)) rotate(var(--fr, 15deg)); }
 }
 .grid-wrap .grid-item.falling {
-  animation: fall .95s cubic-bezier(.55,.06,.9,.45) forwards;
-  animation-delay: var(--fd, 0ms);
-  z-index: 5;
+  animation: fall .8s cubic-bezier(.4, 0, .7, .4) var(--fd, 0ms) forwards;
+  box-shadow: 0 8px 18px rgba(60,45,25,.22);
 }
 
 /* --- 기분 통계 --- */
@@ -800,6 +801,10 @@ button.cal-day.thumb::after {
   content: ""; position: absolute; inset: 0;
   background: linear-gradient(180deg, rgba(0,0,0,.25) 0%, rgba(0,0,0,0) 40%);
 }
+/* 선택된 날짜 강조 */
+button.cal-day.sel { box-shadow: 0 0 0 2.5px var(--accent); }
+button.cal-day.sel.thumb { box-shadow: 0 0 0 2.5px var(--accent); }
+.entry-list-head { font-size: 13px; font-weight: 600; color: var(--ink); padding: 2px 4px 2px; }
 
 /* 달력 아래 일기 목록 */
 .entry-list {
