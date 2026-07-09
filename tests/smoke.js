@@ -380,11 +380,12 @@ function ok(cond, name) {
   await page.evaluate(() => window.__diary.cascadeGrid());
   ok(await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length) > 0, '와르르 떨어지는 애니메이션 적용');
   await page.waitForTimeout(1000);
-  ok(await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length) > 0, '떨어진 뒤 사라지지 않고 아래에 쌓여 멈춤');
-  ok(await page.evaluate(() => window.__diary.isFallen()), '쌓임 상태 유지');
-  // 길게 누르기(복구 훅) → 원래대로
+  const stillThere = await page.evaluate(() => window.__diary.gridCount());
+  const pileTf = await page.evaluate(() => document.querySelector('#grid-wrap .grid-item').style.transform);
+  ok(await page.evaluate(() => window.__diary.isFallen()) && stillThere > 0 && pileTf.includes('translate'),
+     '떨어진 뒤 사라지지 않고 아래에 쌓여 멈춤');
+  // 복구
   await page.evaluate(() => window.__diary.restoreGrid());
-  ok(await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length) === 0, '길게 누르면 원래대로 정리');
   ok(!(await page.evaluate(() => window.__diary.isJiggling())) && !(await page.evaluate(() => window.__diary.isFallen())), '복구 후 편집·쌓임 해제');
 
   console.log('\n[24] 기분 통계');
@@ -483,15 +484,30 @@ function ok(cond, name) {
   await page.click('#grid-filter-clear');
   ok(await page.evaluate(() => window.__diary.gridFilter()) === '', '전체 보기로 해제');
 
-  console.log('\n[30] 편집 모드 와르르 → 아래 쌓임 유지 → 길게 눌러 복구');
+  console.log('\n[30] 와르르 → 개별 드래그 정리 · 흐트리기 · 정리하기');
   await page.evaluate(() => window.__diary.show('scr-grid'));
   await page.evaluate(() => window.__diary.setJiggle(true));
   await page.evaluate(() => window.__diary.cascadeGrid());
   await page.waitForTimeout(950);
-  ok((await page.evaluate(() => document.querySelectorAll('#grid-wrap .grid-item.falling').length)) > 0 &&
-     await page.evaluate(() => window.__diary.isFallen()), '떨어진 사진이 아래에 쌓인 채 멈춤');
-  await page.evaluate(() => window.__diary.restoreGrid());
-  ok(!(await page.evaluate(() => window.__diary.isFallen())), '길게 누르면 복구');
+  ok(await page.evaluate(() => window.__diary.isFallen()), '떨어져 쌓인 상태');
+  ok(await page.isVisible('#grid-fallen-ctrl'), '흐트리기/정리 버튼 표시');
+  // 개별 사진 손으로 옮기기 (한 장의 위치가 바뀜)
+  const dragB = await page.evaluate(() => window.__diary.fallenPosOf(0));
+  await page.evaluate(() => window.__diary.dragItemBy(0, 40, -30));
+  const dragA = await page.evaluate(() => window.__diary.fallenPosOf(0));
+  ok(dragA.x === dragB.x + 40 && dragA.y === dragB.y - 30, '쌓인 사진을 개별로 끌어서 이동');
+  const tf = await page.evaluate(() => document.querySelector('#grid-wrap .grid-item[data-k="0"]').style.transform);
+  ok(tf.includes('translate'), `옮긴 위치가 화면에 반영 (${tf.slice(0, 22)}…)`);
+  // 흐트리기 — 여러 장 위치가 제각각으로 바뀜
+  const posBefore = await page.evaluate(() => [0, 1, 2].map((k) => window.__diary.fallenPosOf(k)));
+  await page.click('#btn-scatter');
+  await page.waitForTimeout(100);
+  const posAfter = await page.evaluate(() => [0, 1, 2].map((k) => window.__diary.fallenPosOf(k)));
+  ok(posAfter.some((p, i) => p && posBefore[i] && (p.x !== posBefore[i].x || p.y !== posBefore[i].y)), '흐트리기로 사진들이 흩어짐');
+  // 정리하기 → 원래대로
+  await page.click('#btn-tidy');
+  ok(!(await page.evaluate(() => window.__diary.isFallen())), '정리하기 → 원래대로');
+  ok(await page.isHidden('#grid-fallen-ctrl'), '정리 후 버튼 숨김');
 
   console.log('\n[31] PWA 구성');
   const root = path.resolve(__dirname, '..');

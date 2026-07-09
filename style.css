@@ -737,6 +737,21 @@ button.cal-day.empty:hover { background: var(--paper-2); }
   animation: fall .8s cubic-bezier(.4, 0, .7, .4) var(--fd, 0ms) forwards;
   box-shadow: 0 8px 18px rgba(60,45,25,.22);
 }
+/* 쌓인/흩어진 사진 — 손으로 끌어 정리 */
+.grid-fallen { }
+.grid-wrap.fallen { touch-action: none; }
+.grid-wrap.fallen .grid-item {
+  cursor: grab; box-shadow: 0 8px 18px rgba(60,45,25,.22); touch-action: none;
+}
+.grid-wrap.fallen .grid-item:active { cursor: grabbing; }
+/* 흐트리기 / 정리 버튼 */
+.grid-fallen-ctrl {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(94px + env(safe-area-inset-bottom, 0px)); z-index: 62;
+  display: flex; gap: 10px;
+  background: rgba(255,255,255,.92); backdrop-filter: blur(10px);
+  padding: 8px; border-radius: 999px; box-shadow: var(--shadow);
+}
 
 /* --- 기분 통계 --- */
 .stats-card {

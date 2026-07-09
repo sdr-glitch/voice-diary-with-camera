@@ -1527,18 +1527,20 @@ function renderGrid() {
     wrap.classList.remove('jiggle');
     return;
   }
-  wrap.innerHTML = refs.map(({ e, i }) => {
+  wrap.innerHTML = refs.map(({ e, i }, k) => {
     const d = parseDate(e.date);
     const media = e.thumb
       ? `<img src="${e.thumb}" alt="">`
       : `<span class="grid-textcard">${escapeHTML((e.text || '기록').replace(/\s+/g, ' ').slice(0, 14))}</span>`;
     const tag = e.kind === 'video' ? '<span class="grid-vtag">영상</span>' : '';
-    return `<button class="grid-item" data-idx="${i}" style="--jd:${(i % 6) * 0.06}s">
+    return `<button class="grid-item" data-idx="${i}" data-k="${k}" style="--jd:${(k % 6) * 0.06}s">
       ${media}${tag}
       <span class="grid-date">${d.getMonth() + 1}.${d.getDate()}</span>
     </button>`;
   }).join('');
   wrap.classList.toggle('jiggle', gridJiggle);
+  wrap.classList.remove('fallen');
+  $('#grid-fallen-ctrl').classList.add('hidden');
 }
 function setJiggle(on) {
   gridJiggle = (on === undefined) ? !gridJiggle : on;
@@ -1548,22 +1550,29 @@ function setJiggle(on) {
     : '길게 눌러 편집 · 위아래로 쓸면 와르르';
 }
 let gridFallen = false;
-/** 편집 중 스와이프 → 사진이 화면 아래로 떨어져 쌓임(그대로 멈춤). 복구는 길게 누르기 */
+let fallenPos = [];   // 위치 인덱스별 이동량 {x,y,r}
+let natRect = [];     // 위치 인덱스별 원래 화면좌표 {left,top,w,h}
+// 결정론적 유사난수 (테스트 재현성 위해 Math.random 대신 인덱스 기반)
+function prand(n) { const s = Math.sin(n * 12.9898) * 43758.5453; return s - Math.floor(s); }
+
+/** 편집 중 스와이프 → 사진이 화면 아래로 떨어져 쌓임(그대로 멈춤) */
 function cascadeGrid() {
   if (cascading || !gridJiggle || gridFallen) return;
   cascading = true;
   const wrap = $('#grid-wrap');
-  wrap.classList.remove('jiggle');        // 떨어지는 동안 흔들림 멈춤
+  wrap.classList.remove('jiggle');
   const items = $$('#grid-wrap .grid-item');
   const vh = window.innerHeight;
+  natRect = items.map((el) => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, w: r.width, h: r.height }; });
+  fallenPos = items.map((el, k) => {
+    const r = natRect[k];
+    const restBottom = vh - 96 - (k % 5) * 7;              // 바닥 근처, 살짝 층지게
+    return { x: (((k * 13) % 17) - 8) * 5, y: Math.max(0, restBottom - (r.top + r.h)), r: (k % 2 ? 1 : -1) * (8 + (k * 11) % 22) };
+  });
   items.forEach((el, k) => {
-    const r = el.getBoundingClientRect();
-    // 바닥 근처에 살짝 층지게 쌓이도록 목표 이동량 계산
-    const restBottom = vh - 96 - (k % 5) * 7;
-    const ty = Math.max(0, restBottom - r.bottom);
-    el.style.setProperty('--ty', ty + 'px');
-    el.style.setProperty('--fx', ((((k * 13) % 17) - 8) * 5) + 'px');
-    el.style.setProperty('--fr', ((k % 2 ? 1 : -1) * (8 + (k * 11) % 22)) + 'deg');
+    el.style.setProperty('--ty', fallenPos[k].y + 'px');
+    el.style.setProperty('--fx', fallenPos[k].x + 'px');
+    el.style.setProperty('--fr', fallenPos[k].r + 'deg');
     el.style.setProperty('--fd', (k * 40) + 'ms');
     el.style.zIndex = String(10 + k);
     el.classList.add('falling');
@@ -1572,49 +1581,106 @@ function cascadeGrid() {
   setTimeout(() => {
     cascading = false;
     gridFallen = true;
-    $('#grid-hint').textContent = '화면을 길게 누르면 다시 제자리로 정리돼요';
+    applyFallen(false);   // CSS 애니메이션 → 인라인 transform으로 고정(이후 드래그 가능)
+    wrap.classList.add('fallen');
+    $('#grid-hint').textContent = '사진을 끌어 정리하거나, 아래 버튼으로 흐트려요';
+    $('#grid-fallen-ctrl').classList.remove('hidden');
   }, 900);
 }
-/** 쌓인 사진을 원래대로 (길게 누르기로 호출) */
+/** fallenPos를 인라인 transform으로 적용 (smooth=true면 부드럽게 이동) */
+function applyFallen(smooth) {
+  $$('#grid-wrap .grid-item').forEach((el, k) => {
+    el.classList.remove('falling');
+    el.style.animation = 'none';
+    el.style.transition = smooth ? 'transform .5s cubic-bezier(.2,.7,.3,1)' : 'none';
+    const p = fallenPos[k] || { x: 0, y: 0, r: 0 };
+    el.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${p.r}deg)`;
+  });
+}
+/** 흐트리기 — 쌓인 사진을 화면 곳곳에 흩뿌림 */
+function scatterGrid() {
+  if (!gridFallen) return;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  fallenPos = fallenPos.map((p, k) => {
+    const r = natRect[k] || { left: 0, top: 0, w: 96, h: 96 };
+    const absX = 10 + prand(k + 1) * Math.max(10, vw - 20 - r.w);
+    const absY = 80 + prand(k + 7) * Math.max(10, vh - 260 - r.h);
+    return { x: Math.round(absX - r.left), y: Math.round(absY - r.top), r: Math.round((prand(k + 3) - 0.5) * 70) };
+  });
+  applyFallen(true);
+  playFx('flip');
+  $('#grid-hint').textContent = '흩어진 사진을 끌어 정리하거나 「정리하기」를 눌러요';
+}
+/** 쌓인/흩어진 사진을 원래대로 */
 function restoreGrid() {
   gridFallen = false;
   gridJiggle = false;
+  fallenPos = []; natRect = [];
+  $('#grid-wrap').classList.remove('fallen');
+  $$('#grid-wrap .grid-item').forEach((el) => { el.style.transition = ''; el.style.animation = ''; el.style.transform = ''; el.style.zIndex = ''; });
   renderGrid();
   $('#grid-hint').textContent = '길게 눌러 편집 · 위아래로 쓸면 와르르';
+  $('#grid-fallen-ctrl').classList.add('hidden');
 }
-/** 그리드 제스처: 길게 누르면 흔들림(편집) 토글, 편집 중 위아래로 쓸면 와르르 */
+/** 그리드 제스처: 길게 누르면 편집 토글 · 편집 중 위아래로 쓸면 와르르 · 쌓인 뒤 개별 드래그 */
 function bindGrid() {
   const gw = $('#grid-wrap');
-  let lpTimer = 0, startY = 0, suppressClick = false;
+  let lpTimer = 0, startY = 0, startX = 0, suppressClick = false;
+  let dragK = -1, dragSX = 0, dragSY = 0, dragBX = 0, dragBY = 0, dragEl = null;
+
   gw.addEventListener('pointerdown', (e) => {
-    startY = e.clientY;
+    startY = e.clientY; startX = e.clientX;
     clearTimeout(lpTimer);
-    lpTimer = setTimeout(() => {
-      if (gridFallen) restoreGrid();   // 쌓여 있으면 → 원래대로
-      else setJiggle();                // 아니면 편집 토글
-      suppressClick = true;
-    }, 450);
+    if (gridFallen) {
+      const it = e.target.closest('.grid-item');
+      if (it) {
+        // 쌓인/흩어진 사진을 손으로 끌어 정리
+        dragK = Number(it.dataset.k); dragEl = it;
+        dragSX = e.clientX; dragSY = e.clientY;
+        const p = fallenPos[dragK] || { x: 0, y: 0, r: 0 };
+        dragBX = p.x; dragBY = p.y;
+        it.style.transition = 'none'; it.style.zIndex = '999';
+        it.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+      }
+      // 빈 곳 길게 누르면 원래대로
+      lpTimer = setTimeout(() => { restoreGrid(); suppressClick = true; }, 450);
+      return;
+    }
+    lpTimer = setTimeout(() => { setJiggle(); suppressClick = true; }, 450);
   });
+
   gw.addEventListener('pointermove', (e) => {
+    if (dragK >= 0) {
+      const p = fallenPos[dragK];
+      p.x = dragBX + (e.clientX - dragSX);
+      p.y = dragBY + (e.clientY - dragSY);
+      dragEl.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${p.r}deg)`;
+      return;
+    }
     if (Math.abs(e.clientY - startY) > 12) clearTimeout(lpTimer);
-    if (gridJiggle && Math.abs(e.clientY - startY) > 45) cascadeGrid();
+    if (gridJiggle && !gridFallen && Math.abs(e.clientY - startY) > 45) cascadeGrid();
   });
-  // 편집 모드에서 세로 스와이프가 스크롤로 새지 않도록 (touchmove는 비-passive로 preventDefault)
+
   gw.addEventListener('touchmove', (e) => {
+    if (dragK >= 0 || gridFallen) { e.preventDefault(); return; }
     if (gridJiggle) {
       const y = e.touches[0].clientY;
       if (Math.abs(y - startY) > 45) cascadeGrid();
       e.preventDefault();
     }
   }, { passive: false });
-  const end = () => { clearTimeout(lpTimer); };
+
+  const end = () => { clearTimeout(lpTimer); if (dragK >= 0) { suppressClick = true; dragK = -1; dragEl = null; } };
   gw.addEventListener('pointerup', end);
   gw.addEventListener('pointercancel', end);
+
   gw.addEventListener('click', (e) => {
     if (suppressClick) { suppressClick = false; return; }
     const it = e.target.closest('.grid-item');
     if (!it) return;
-    if (gridJiggle) return;   // 편집 모드에선 이동하지 않음
+    if (gridJiggle || gridFallen) return;
     jumpToEntry(Number(it.dataset.idx));
   });
 }
@@ -1867,6 +1933,8 @@ function bind() {
   // 모아보기 (그리드) — 롱프레스 흔들림 + 위아래 스와이프 와르르, 기분 필터 해제
   bindGrid();
   $('#grid-filter-clear').onclick = () => { gridFilterMood = ''; renderGrid(); };
+  $('#btn-scatter').onclick = scatterGrid;
+  $('#btn-tidy').onclick = restoreGrid;
 
   // 브이로그 보관함
   $('#btn-new-vlog').onclick = () => openSub('scr-vlog');
@@ -2110,7 +2178,14 @@ window.__diary = {
   },
   reminder: { on: remindOn, time: remindTime, show: showReminderBanner, schedule: scheduleReminder },
   // 모아보기·통계·브이로그 보관함 훅
-  setJiggle, isJiggling: () => gridJiggle, cascadeGrid, restoreGrid, isFallen: () => gridFallen,
+  setJiggle, isJiggling: () => gridJiggle, cascadeGrid, restoreGrid, scatterGrid, isFallen: () => gridFallen,
+  fallenPosOf: (k) => (fallenPos[k] ? { ...fallenPos[k] } : null),
+  dragItemBy: (k, dx, dy) => { // 테스트용: k번째 사진을 (dx,dy) 만큼 손으로 옮긴 것처럼
+    if (!gridFallen || !fallenPos[k]) return;
+    fallenPos[k].x += dx; fallenPos[k].y += dy;
+    const el = $(`#grid-wrap .grid-item[data-k="${k}"]`);
+    if (el) el.style.transform = `translate(${fallenPos[k].x}px, ${fallenPos[k].y}px) rotate(${fallenPos[k].r}deg)`;
+  },
   gridCount: () => $$('#grid-wrap .grid-item').length,
   selectDate: (d) => { selDate = d; renderCal(); }, getSelDate: () => selDate,
   statsCounts: (ym) => { statsYM = ym; renderMoodStats();
