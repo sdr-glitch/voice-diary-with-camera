@@ -45,7 +45,7 @@
 - IndexedDB `moment-diary` / store `entries` — `{ id, diaryId, date(YYYY-MM-DD), ts, kind: photo|video|none, blob, thumb, filter, durMs, weather, mood, author, fit, stickers:[{e,x,y,s}], text }` (`diaryId`로 일기장 소속 구분)
   (스티커는 미디어에 굽지 않고 메타데이터로 저장 → 페이지에선 오버레이, 브이로그에선 캔버스에 그림)
 - 영상은 **길이 제한 없음**: 셔터로 녹화 시작/정지 토글(`startVideoRec`/`stopVideoRec`), `durMs` 저장. 녹화 중에도 캔버스가 갱신돼야 captureStream에 담김(`!(captured&&captured.blob)`일 때 draw).
-- localStorage(`momentDiary:`): sound·volume·remindOn·remindTime·outro·frame·tape·customTopics(전역)·diaries·active·**covers:\<id\>·members:\<id\>**(일기장별).
+- localStorage(`momentDiary:`): sound·volume·remindOn·remindTime·outro·frame·tape·customTopics(전역)·diaries·active·**covers:\<id\>·members:\<id\>·events:\<id\>**(일기장별). 일기장 표지 사진은 diary 레코드의 `cover`(dataURL).
 - **주제**: `TOPICS`(프리셋) + `loadCustomTopics()`(사용자 직접, 전역), `allTopics()`. 주제는 **활성 일기장 레코드**에 저장(`getTopic`/`setTopic`). 새 일기장 창(`#onboard`)에서 주제+이름 선택→`addDiary`, 설정에서 변경·직접 만들기(`addCustomTopic`)·삭제.
 - **함께 쓰기**: `loadMembers()`(일기장별, 기본 [나]), 설정에서 추가/삭제. 기록 시 멤버 2명+면 `#author-row`로 작성자 선택(`activeAuthor`), `entry.author` 저장, 페이지·목록·그리드에 표시(`authorTag`, 색 점).
 - **교환일기(서버 없음)**: `exportDiary`(미디어 base64 dataURL 포함 JSON 내보내기) / `importDiary`(id 기준 중복 제외 병합, 멤버·주제·대표사진도 합침). 실시간 동기화는 백엔드 도입 시 추가.
@@ -61,7 +61,10 @@
 - **사진 달력**: `renderCal`이 `coverEntry(date)` thumb로 셀 배경. 영상 thumb=첫 프레임 정지컷.
 - **기분 통계**(`renderMoodStats`): 월별 `MOODS` 분포 막대(버튼→`openMoodCollection` 모아보기)+최다 기분 요약+`MOOD_CARD`(공감/위로/응원). `statsYM` 상태.
 - **대표 사진**: `momentDiary:covers:<diaryId>`(date→entryId) localStorage. `coversKey()`/`setCover`/`coverEntry`/`isCover`.
-- **브이로그 보관함**: IndexedDB `vlogs` 스토어(DB v2). `saveVlogToLib`(생성 후 `#btn-vlog-keep`), `renderVlogLib` 카드(재생=인라인 video/저장/삭제), `VLOG_CAP`개 초과 시 오래된 것 정리.
+- **영상 형식(호환성)**: `pickMime()`은 **mp4(H.264) 최우선** → webm 최후. webm은 아이폰에서 재생 불가라 반드시 mp4를 우선함. 다운로드 파일명은 `extForType(blob.type)`로 **실제 내용과 확장자 일치**(확장자 불일치로 재생 안 되던 문제 해결). 저장 vlog에 `rec.mime` 보관.
+- **브이로그 보관함**: IndexedDB `vlogs` 스토어(DB v2, `{id,ym,title,createdTs,thumb,blob,mime}`). `saveVlogToLib`(생성 후 `#btn-vlog-keep`), `renderVlogLib`=**바둑판 타일**(`.vlog-tile`), 타일 클릭→`openVlogViewer`(전체화면 `#vlog-viewer`, 저장/삭제/닫기), `VLOG_CAP`개 초과 시 오래된 것 정리.
+- **다이어리 표지 사진**: `diary.cover`=축소(≤640px)·jpeg dataURL. `setDiaryCover(id,file)`/`clearDiaryCover(id)`(설정 일기장 목록), 책 타일 `.has-cover`로 배경+어두운 그라데이션. 없으면 주제색 책등.
+- **일정·기념일**: `momentDiary:events:<diaryId>`=`[{id,date,title,type:plan|anniv,yearly}]`. `loadEvents/addEvent/removeEvent/eventsOnDate/eventDaysInMonth`. 반복 기념일은 월-일 매칭. 달력 셀 `.ev-dot`, 선택 날짜 아래 일정 섹션(`eventsSectionHTML`, `#ev-add`→`#event-modal`), **다가오는 일정 배너**(`renderUpcoming`, `upcomingEvents`/`nextOccurrence`/`ddayLabel`, `#upcoming`). 미래 날짜도 눌러 일정 확인·추가 가능(빈 과거·오늘만 눌러서 기록). 전체 초기화·일기장 삭제 시 events 키도 정리.
 - localStorage는 `momentDiary:` 접두사 (작은 상태만)
 - 전체 초기화는 IndexedDB 삭제 + `momentDiary:*` 키 삭제 둘 다 필요
 
@@ -72,7 +75,7 @@ NODE_PATH=$(npm root -g) PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node tests/sm
 ```
 
 - headless Chromium + `--use-fake-device-for-media-stream`(가짜 카메라)으로 전 구간 검증
-- **테스트 훅** `window.__diary`: `ready() getEntries() show(id) saveEntry() deleteEntry(id) openEditEntry buildVlog(ym,onProg,{bgm,fx,title,outro,targetSec,ids}) addEntry({...,mood,durMs})(활성 일기장에 저장) camState()(recording 포함) testFilter(name) speechSupported() getFit/setFit getFrame/getTape/setFrame/setTape addSticker/getStickers goCalendar(ym) jumpToEntry(idx) openCaptureFor(date)/getCaptureDate() importFile(file)/setFilter(f) startVideoRec/stopVideoRec/isRecording getClips/moveClip/toggleClip/setTarget fxSample/bubbleSample reminder{on,time,show,schedule} renderPolaroidTest(dataURL) setJiggle/isJiggling/cascadeGrid/restoreGrid/isFallen/fallenPosOf/dragItemBy/gridCount statsCounts(ym) openMoodCollection/gridFilter setCover/coverEntryId saveVlogToLib/getVlogs/deleteVlogNow(id) getTopic/setTopic/allTopics/addCustomTopic/loadCustomTopics getMembers/addMember/setActiveAuthor exportData/importData maybeOnboard/openNewDiary/onboardVisible **getDiaries/activeDiaryId/addDiary/renameDiary/removeDiary/openDiary/renderShelf/ensureDiary**`
+- **테스트 훅** `window.__diary`: `ready() getEntries() show(id) saveEntry() deleteEntry(id) openEditEntry buildVlog(ym,onProg,{bgm,fx,title,outro,targetSec,ids}) addEntry({...,mood,durMs})(활성 일기장에 저장) camState()(recording 포함) testFilter(name) speechSupported() getFit/setFit getFrame/getTape/setFrame/setTape addSticker/getStickers goCalendar(ym) jumpToEntry(idx) openCaptureFor(date)/getCaptureDate() importFile(file)/setFilter(f) startVideoRec/stopVideoRec/isRecording getClips/moveClip/toggleClip/setTarget fxSample/bubbleSample reminder{on,time,show,schedule} renderPolaroidTest(dataURL) setJiggle/isJiggling/cascadeGrid/restoreGrid/isFallen/fallenPosOf/dragItemBy/gridCount statsCounts(ym) openMoodCollection/gridFilter setCover/coverEntryId saveVlogToLib/getVlogs/deleteVlogNow(id) getTopic/setTopic/allTopics/addCustomTopic/loadCustomTopics getMembers/addMember/setActiveAuthor exportData/importData maybeOnboard/openNewDiary/onboardVisible **getDiaries/activeDiaryId/addDiary/renameDiary/removeDiary/openDiary/renderShelf/ensureDiary setDiaryCoverData/getDiaryCover/clearDiaryCover getEvents/addEvent/removeEvent/eventsOnDate/upcomingEvents/ddayLabel/openEventModal openVlogViewer/closeVlogViewer/pickMime/extForType**`
 - 큰 기록은 IndexedDB에 있으므로 localStorage 직접 읽기/시드 금지 — 훅 사용. **일기장 시드**: initScript로 `momentDiary:diaries`+`active`를 심어 온보딩 스킵(전체 삭제 스텝 뒤엔 온보딩에서 새 일기장 하나 만들어 이어감).
 - 음성 받아쓰기는 headless에서 실제 변환 불가 → 안내 문구 + 직접 입력 경로만 검증
 

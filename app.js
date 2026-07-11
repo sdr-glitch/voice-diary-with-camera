@@ -91,6 +91,7 @@ const APP_NAME = '순간일기';
    기록(entry)마다 diaryId 로 소속을 구분하고, 메모리 entries 는 활성 일기장만 담는다.
    covers/members 는 일기장별로 localStorage 키를 나눈다(covers:<id> / members:<id>). */
 let obPick = '';   // 온보딩·새 일기장에서 고른 주제 key
+let coverTargetId = '';  // 표지 사진을 바꾸는 대상 일기장 id
 function loadDiaries() {
   try { const a = JSON.parse(localStorage.getItem(LS_PREFIX + 'diaries') || '[]'); return Array.isArray(a) ? a : []; }
   catch (e) { return []; }
@@ -125,7 +126,42 @@ async function removeDiary(id) {
   }
   localStorage.removeItem(LS_PREFIX + 'covers:' + id);
   localStorage.removeItem(LS_PREFIX + 'members:' + id);
+  localStorage.removeItem(LS_PREFIX + 'events:' + id);
   saveDiaries(loadDiaries().filter((d) => d.id !== id));
+}
+/** 일기장 표지 사진 설정 — 이미지를 적당히 줄여 dataURL로 diary 레코드에 저장 */
+function coverImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const maxW = 640;
+      const scale = Math.min(1, maxW / (img.naturalWidth || maxW));
+      const w = Math.round((img.naturalWidth || maxW) * scale);
+      const h = Math.round((img.naturalHeight || maxW) * scale);
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.72));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('img')); };
+    img.src = url;
+  });
+}
+async function setDiaryCover(id, file) {
+  if (!file) return;
+  try {
+    const dataURL = await coverImageFromFile(file);
+    const a = loadDiaries(); const d = a.find((x) => x.id === id);
+    if (d) { d.cover = dataURL; saveDiaries(a); }
+    renderShelf(); renderDiaryList();
+    toast('표지 사진을 바꿨어요.');
+  } catch (e) { toast('사진을 불러오지 못했어요. 다른 사진으로 해보세요.'); }
+}
+function clearDiaryCover(id) {
+  const a = loadDiaries(); const d = a.find((x) => x.id === id);
+  if (d) { delete d.cover; saveDiaries(a); }
+  renderShelf(); renderDiaryList();
 }
 /** 일기장 열기 — 그 일기장의 기록만 메모리에 싣고 달력(홈)으로 */
 async function openDiary(id) {
@@ -171,6 +207,59 @@ function coverEntry(date) {
 }
 function isCover(e) {
   return coverEntry(e.date) && coverEntry(e.date).id === e.id;
+}
+
+/* ==================== 일정·기념일 (일기장별) ==================== */
+/* events: [{ id, date:'YYYY-MM-DD', title, type:'plan'|'anniv', yearly:bool }] */
+function eventsKey() { return LS_PREFIX + 'events:' + activeDiaryId(); }
+function loadEvents() {
+  try { const a = JSON.parse(localStorage.getItem(eventsKey()) || '[]'); return Array.isArray(a) ? a : []; }
+  catch (e) { return []; }
+}
+function saveEvents(a) { localStorage.setItem(eventsKey(), JSON.stringify(a)); }
+function addEvent(date, title, type, yearly) {
+  title = (title || '').trim(); if (!date || !title) return;
+  const a = loadEvents();
+  a.push({ id: uid(), date, title: title.slice(0, 30), type: type === 'anniv' ? 'anniv' : 'plan', yearly: !!yearly });
+  saveEvents(a);
+}
+function removeEvent(id) { saveEvents(loadEvents().filter((e) => e.id !== id)); }
+/** 그 날짜에 해당하는 일정 (매년 반복 기념일은 월-일이 같으면 포함) */
+function eventsOnDate(dateStr) {
+  const md = dateStr.slice(5);
+  return loadEvents().filter((ev) => ev.date === dateStr || (ev.yearly && ev.date.slice(5) === md));
+}
+/** 이 달에 일정이 있는 날짜 집합 (반복 기념일 포함) */
+function eventDaysInMonth(ym) {
+  const set = new Set();
+  const year = ym.slice(0, 4);
+  loadEvents().forEach((ev) => {
+    if (ev.date.slice(0, 7) === ym) set.add(ev.date);
+    if (ev.yearly) { const ds = `${year}-${ev.date.slice(5)}`; if (ds.slice(0, 7) === ym) set.add(ds); }
+  });
+  return set;
+}
+/** 오늘 이후 이 일정의 다음 발생일(YYYY-MM-DD) — 반복이면 올해/내년 중 가까운 쪽 */
+function nextOccurrence(ev, fromStr) {
+  if (!ev.yearly) return ev.date >= fromStr ? ev.date : null;
+  const fy = Number(fromStr.slice(0, 4));
+  let cand = `${fy}-${ev.date.slice(5)}`;
+  if (cand < fromStr) cand = `${fy + 1}-${ev.date.slice(5)}`;
+  return cand;
+}
+/** 다가오는 일정 목록 (오늘 포함, 가까운 순) */
+function upcomingEvents(limit = 3) {
+  const today = todayStr();
+  return loadEvents()
+    .map((ev) => ({ ev, when: nextOccurrence(ev, today) }))
+    .filter((x) => x.when)
+    .sort((a, b) => (a.when < b.when ? -1 : a.when > b.when ? 1 : 0))
+    .slice(0, limit);
+}
+/** 남은 날짜 표시 (오늘/내일/D-n) */
+function ddayLabel(fromStr, toStr) {
+  const diff = Math.round((parseDate(toStr) - parseDate(fromStr)) / 86400000);
+  return diff <= 0 ? '오늘' : diff === 1 ? '내일' : `D-${diff}`;
 }
 
 /* 일기장 주제 (프리셋 + 사용자 커스텀) */
@@ -539,7 +628,9 @@ async function renderShelf() {
     const info = allTopics().find((t) => t.k === d.topic);
     const sub = info ? info.sub : '';
     const n = counts[d.id] || 0;
-    return `<button class="book-tile spine-${i % 5} ${d.id === active ? 'cur' : ''}" data-id="${d.id}">
+    const hasCover = !!d.cover;
+    const style = hasCover ? ` style="background-image:url('${d.cover}')"` : '';
+    return `<button class="book-tile spine-${i % 5} ${d.id === active ? 'cur' : ''}${hasCover ? ' has-cover' : ''}"${style} data-id="${d.id}">
       <span class="book-band" aria-hidden="true"></span>
       <span class="book-name">${escapeHTML(d.name)}</span>
       <span class="book-topic">${escapeHTML(sub)}</span>
@@ -964,10 +1055,18 @@ function thumbFrom(canvas) {
 }
 
 function pickMime() {
-  const list = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+  // mp4(H.264)를 최우선 — 아이폰 사진앱·카톡 공유·PC 어디서나 재생됨.
+  // webm은 아이폰에서 재생이 안 되므로 지원 안 될 때의 최후 대안으로만 사용.
+  const list = [
+    'video/mp4;codecs=h264,aac', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4;codecs=h264', 'video/mp4',
+    'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm',
+  ];
   for (const m of list) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
   return '';
 }
+/** blob/mime 타입에 맞는 파일 확장자 — 확장자와 실제 내용이 달라 재생 안 되던 문제 방지 */
+function extForType(t) { t = t || ''; return t.includes('webm') ? 'webm' : 'mp4'; }
 
 /** 셔터 버튼: 사진이면 즉시 촬영, 영상이면 녹화 시작/정지 토글(길이 제한 없음) */
 async function shutter() {
@@ -1686,7 +1785,7 @@ function downloadVlog() {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(vlogBlob);
   const ym = $('#vlog-month').value.replace('-', '년') + '월';
-  a.download = `순간일기_${ym}_브이로그.webm`;
+  a.download = `순간일기_${ym}_브이로그.${extForType(vlogBlob.type)}`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
@@ -1708,7 +1807,7 @@ async function saveVlogToLib() {
   const first = entries.find((e) => (lastVlogMeta.ids || []).includes(e.id));
   const rec = {
     id: uid(), ym: lastVlogMeta.ym, title: lastVlogMeta.title || `${lastVlogMeta.ym.replace('-', '년 ')}월`,
-    createdTs: Date.now(), thumb: first ? first.thumb : null, blob: vlogBlob,
+    createdTs: Date.now(), thumb: first ? first.thumb : null, blob: vlogBlob, mime: vlogBlob.type,
   };
   await vlogPut(rec);
   await loadVlogs();
@@ -1736,9 +1835,12 @@ function downloadVlogRec(id) {
   if (!rec) return;
   const a = document.createElement('a');
   a.href = vlogURL(rec);
-  a.download = `순간일기_${rec.ym.replace('-', '년')}월_브이로그.webm`;
+  const ext = extForType(rec.mime || (rec.blob && rec.blob.type));
+  a.download = `순간일기_${rec.ym.replace('-', '년')}월_브이로그.${ext}`;
   a.click();
+  toast('기기에 저장했어요. 사진앱/파일에서 확인하거나 카톡으로 공유할 수 있어요.');
 }
+/** 브이로그 보관함 — 모아보기처럼 바둑판(그리드)으로 */
 function renderVlogLib() {
   const wrap = $('#vloglib-wrap');
   if (!vlogs.length) {
@@ -1748,32 +1850,32 @@ function renderVlogLib() {
   wrap.innerHTML = vlogs.map((v) => {
     const d = new Date(v.createdTs);
     const dstr = `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`;
-    return `<div class="vlog-card-item" data-id="${v.id}">
-      <button class="vlog-thumb vlog-play-btn" data-id="${v.id}" aria-label="재생">
-        ${v.thumb ? `<img src="${v.thumb}" alt="">` : ''}<span class="vlog-play">▶</span>
-      </button>
-      <div class="vlog-meta">
+    return `<button class="vlog-tile" data-id="${v.id}" aria-label="브이로그 크게 보기">
+      <span class="vlog-tile-thumb">${v.thumb ? `<img src="${v.thumb}" alt="">` : ''}<span class="vlog-play">▶</span></span>
+      <span class="vlog-tile-meta">
         <b>${escapeHTML(v.title || '브이로그')}</b>
         <span>${v.ym.replace('-', '년 ')}월 · ${dstr}</span>
-      </div>
-      <div class="vlog-item-btns">
-        <button class="tbtn vlog-dl-btn" data-id="${v.id}">저장</button>
-        <button class="tbtn danger vlog-del-btn" data-id="${v.id}">삭제</button>
-      </div>
-    </div>`;
+      </span>
+    </button>`;
   }).join('');
 }
-function playVlogRec(id) {
+/** 브이로그 큰 화면(전체) 재생 뷰어 */
+let viewerVlogId = '';
+function openVlogViewer(id) {
   const rec = vlogs.find((v) => v.id === id);
   if (!rec) return;
-  const card = $(`.vlog-card-item[data-id="${id}"]`);
-  if (!card || card.querySelector('video')) return;
-  const thumb = card.querySelector('.vlog-thumb');
-  const v = document.createElement('video');
-  v.src = vlogURL(rec); v.controls = true; v.autoplay = true; v.playsInline = true;
-  v.className = 'vlog-inline-video';
-  thumb.replaceWith(v);
+  viewerVlogId = id;
+  const v = $('#vlog-viewer-video');
+  v.src = vlogURL(rec); v.controls = true; v.playsInline = true;
+  $('#vlog-viewer-title').textContent = `${rec.title || '브이로그'} · ${rec.ym.replace('-', '년 ')}월`;
+  $('#vlog-viewer').classList.add('on');
   v.play().catch(() => {});
+}
+function closeVlogViewer() {
+  const v = $('#vlog-viewer-video');
+  v.pause(); v.removeAttribute('src'); v.load();
+  $('#vlog-viewer').classList.remove('on');
+  viewerVlogId = '';
 }
 
 /* ==================== 모아보기 (그리드 갤러리) ==================== */
@@ -2034,6 +2136,7 @@ function renderCal() {
       selDate = withDays.length ? withDays[withDays.length - 1] : '';
     }
   }
+  const evDays = eventDaysInMonth(calYM);
   let html = DOW.map((d) => `<span class="cal-dow">${d}</span>`).join('');
   for (let i = 0; i < startDow; i++) html += '<span></span>';
   for (let d = 1; d <= days; d++) {
@@ -2041,37 +2144,105 @@ function renderCal() {
     const idx = firstIdxByDay.get(ds);
     const isToday = ds === today;
     const isFuture = ds > today;
+    const evDot = evDays.has(ds) ? '<i class="ev-dot"></i>' : '';
     const cls = (isToday ? ' today' : '') + (ds === selDate ? ' sel' : '');
     if (idx !== undefined) {
       // 기록 있는 날 — 대표 사진이 있으면 썸네일 셀, 없으면(글만) 점 셀
       const cov = coverEntry(ds);
       if (cov && cov.thumb) {
-        html += `<button class="cal-day has thumb${cls}" data-date="${ds}" style="background-image:url('${cov.thumb}')"><span class="cal-num">${d}</span></button>`;
+        html += `<button class="cal-day has thumb${cls}" data-date="${ds}" style="background-image:url('${cov.thumb}')"><span class="cal-num">${d}</span>${evDot}</button>`;
       } else {
-        html += `<button class="cal-day has${cls}" data-date="${ds}">${d}<i></i></button>`;
+        html += `<button class="cal-day has${cls}" data-date="${ds}">${d}<i></i>${evDot}</button>`;
       }
     } else if (isFuture) {
-      html += `<span class="cal-day future">${d}</span>`;
+      // 미래라도 일정이 있으면 눌러서 볼 수 있게
+      html += `<button class="cal-day future${cls}" data-date="${ds}">${d}${evDot}</button>`;
     } else {
-      html += `<button class="cal-day empty${cls}" data-date="${ds}">${d}</button>`;
+      html += `<button class="cal-day empty${cls}" data-date="${ds}">${d}${evDot}</button>`;
     }
   }
   $('#cal-grid').innerHTML = html;
+  renderUpcoming();
   renderCalEntryList();
 }
+/** 다가오는 일정 배너 (오늘/내일/그 다음) */
+function renderUpcoming() {
+  const wrap = $('#upcoming');
+  if (!wrap) return;
+  const list = upcomingEvents(3);
+  if (!list.length) { wrap.classList.add('hidden'); wrap.innerHTML = ''; return; }
+  const today = todayStr();
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = list.map(({ ev, when }) => {
+    const dd = ddayLabel(today, when);
+    const w = parseDate(when);
+    return `<button class="up-item" data-date="${when}">
+      <span class="up-dday">${dd}</span>
+      <span class="up-title">${escapeHTML(ev.title)}${ev.type === 'anniv' ? ' (기념일)' : ''}</span>
+      <span class="up-date">${w.getMonth() + 1}.${w.getDate()}</span>
+    </button>`;
+  }).join('');
+}
 
-/** 달력 아래 — 선택한 날짜의 일기를 크게 보고 바로 수정 */
+/* 일정 추가 모달 */
+let eventModalDate = '';
+let eventModalType = 'plan';
+function openEventModal(date) {
+  eventModalDate = date || selDate || todayStr();
+  eventModalType = 'plan';
+  const d = parseDate(eventModalDate);
+  $('#event-modal-date').textContent = `${d.getMonth() + 1}월 ${d.getDate()}일 · 일정·기념일 추가`;
+  $('#event-title').value = '';
+  $('#event-yearly').checked = false;
+  $$('#event-type-row .chip').forEach((b) => b.classList.toggle('on', b.dataset.type === 'plan'));
+  $('#event-yearly-row').classList.add('hidden');
+  $('#event-modal').classList.add('on');
+  setTimeout(() => $('#event-title').focus(), 40);
+}
+function closeEventModal() { $('#event-modal').classList.remove('on'); }
+function confirmEvent() {
+  const title = $('#event-title').value.trim();
+  if (!title) { toast('일정 이름을 입력해 주세요.'); return; }
+  const yearly = eventModalType === 'anniv' && $('#event-yearly').checked;
+  addEvent(eventModalDate, title, eventModalType, yearly);
+  closeEventModal();
+  selDate = eventModalDate; calYM = eventModalDate.slice(0, 7);
+  renderCal();
+  toast(eventModalType === 'anniv' ? '기념일을 저장했어요.' : '일정을 저장했어요.');
+}
+
+/** 선택한 날짜의 일정·기념일 섹션 HTML */
+function eventsSectionHTML() {
+  const evs = eventsOnDate(selDate);
+  const today = todayStr();
+  const rows = evs.length
+    ? evs.map((ev) => {
+        const dd = selDate >= today ? `<span class="ev-dday">${ddayLabel(today, selDate)}</span>` : '';
+        return `<div class="ev-item">
+          <span class="ev-type ${ev.type === 'anniv' ? 'anniv' : ''}">${ev.type === 'anniv' ? '기념일' : '일정'}${ev.yearly ? '·매년' : ''}</span>
+          <b>${escapeHTML(ev.title)}</b>${dd}
+          <button class="ev-del" data-ev="${ev.id}" aria-label="일정 삭제">삭제</button>
+        </div>`;
+      }).join('')
+    : '<p class="ev-empty">이 날의 일정·기념일이 없어요.</p>';
+  return `<div class="cal-events">
+    <div class="cal-events-head"><b>일정·기념일</b><button class="tbtn sm" id="ev-add">＋ 추가</button></div>
+    ${rows}
+  </div>`;
+}
+/** 달력 아래 — 선택한 날짜의 일정 + 일기를 크게 보고 바로 수정 */
 function renderCalEntryList() {
   const wrap = $('#cal-entry-list');
-  if (!selDate) { wrap.innerHTML = '<p class="empty-note sm">날짜를 눌러 그날의 일기를 보세요.</p>'; return; }
+  if (!selDate) { wrap.innerHTML = '<p class="empty-note sm">날짜를 눌러 그날의 일기·일정을 보세요.</p>'; return; }
   const list = entries.filter((e) => e.date === selDate).sort((a, b) => b.ts - a.ts);
   const d = parseDate(selDate);
   const head = `<p class="entry-list-head">${d.getMonth() + 1}월 ${d.getDate()}일 ${DOW[d.getDay()]}요일 · ${list.length}개</p>`;
+  const events = eventsSectionHTML();
   if (!list.length) {
-    wrap.innerHTML = head + `<div class="be-empty"><p class="empty-note sm">이 날엔 아직 기록이 없어요.</p><button class="tbtn primary" id="be-add">이 날 채우기</button></div>`;
+    wrap.innerHTML = head + events + `<div class="be-empty"><p class="empty-note sm">이 날엔 아직 기록이 없어요.</p><button class="tbtn primary" id="be-add">이 날 채우기</button></div>`;
     return;
   }
-  wrap.innerHTML = head + list.map(bigEntryHTML).join('');
+  wrap.innerHTML = head + events + list.map(bigEntryHTML).join('');
   sizePageStickers();
 }
 /** 특정 기록으로 이동 = 달력에서 그 날짜를 열고 카드로 스크롤 */
@@ -2110,10 +2281,21 @@ function renderDiaryList() {
   const many = loadDiaries().length > 1;
   wrap.innerHTML = loadDiaries().map((d) => {
     const info = allTopics().find((t) => t.k === d.topic);
+    const coverBtn = d.cover
+      ? `<button class="tbtn diary-cover" data-cover="${d.id}">표지 바꾸기</button><button class="tbtn diary-cover-clear" data-coverclear="${d.id}">표지 없애기</button>`
+      : `<button class="tbtn diary-cover" data-cover="${d.id}">표지 사진</button>`;
     return `<div class="diary-item ${d.id === active ? 'cur' : ''}">
-      <button class="diary-open" data-open="${d.id}"><b>${escapeHTML(d.name)}</b><span>${escapeHTML(info ? info.label : '')}${d.id === active ? ' · 쓰는 중' : ''}</span></button>
-      <button class="tbtn diary-rename" data-rn="${d.id}">이름</button>
-      ${many ? `<button class="tbtn danger" data-del="${d.id}">삭제</button>` : ''}
+      <div class="diary-row1">
+        <button class="diary-open" data-open="${d.id}">
+          ${d.cover ? `<span class="diary-cover-thumb" style="background-image:url('${d.cover}')"></span>` : ''}
+          <span class="diary-open-txt"><b>${escapeHTML(d.name)}</b><span>${escapeHTML(info ? info.label : '')}${d.id === active ? ' · 쓰는 중' : ''}</span></span>
+        </button>
+      </div>
+      <div class="diary-row2">
+        <button class="tbtn diary-rename" data-rn="${d.id}">이름</button>
+        ${coverBtn}
+        ${many ? `<button class="tbtn danger" data-del="${d.id}">삭제</button>` : ''}
+      </div>
     </div>`;
   }).join('') || '<p class="empty-note sm">아직 일기장이 없어요. 아래에서 새로 만들어 보세요.</p>';
 }
@@ -2316,23 +2498,45 @@ function bind() {
   $('#cal-grid').addEventListener('click', (e) => {
     const day = e.target.closest('.cal-day');
     if (!day || !day.dataset.date) return;
-    if (day.classList.contains('has')) {
-      // 기록 있는 날 → 선택해서 아래 목록에 그날 일기만 표시
+    if (day.classList.contains('empty')) {
+      openCaptureFor(day.dataset.date); // 빈 과거·오늘 → 그날 채우기
+    } else {
+      // 기록 있는 날 / 미래(일정 확인·추가) → 선택해서 아래에 표시
       selDate = day.dataset.date;
       renderCal();
-    } else {
-      openCaptureFor(day.dataset.date); // 빈 날 → 그날 채우기
     }
   });
-  // 달력 아래 (선택 날짜) 크게보기 카드 — 사진/글 수정·대표선택·삭제
+  // 다가오는 일정 배너 → 그 날짜로 이동
+  $('#upcoming').addEventListener('click', (e) => {
+    const it = e.target.closest('.up-item');
+    if (it) { selDate = it.dataset.date; calYM = it.dataset.date.slice(0, 7); renderCal(); }
+  });
+  // 달력 아래 (선택 날짜) — 일정 추가·삭제 + 크게보기 카드(사진/글 수정·대표선택·삭제)
   $('#cal-entry-list').addEventListener('click', (e) => {
     const editp = e.target.closest('.be-editphoto');
     const del = e.target.closest('.be-del');
     const add = e.target.closest('#be-add');
-    if (editp) openEditEntry(editp.dataset.id);
+    const evAdd = e.target.closest('#ev-add');
+    const evDel = e.target.closest('.ev-del');
+    if (evAdd) openEventModal(selDate);
+    else if (evDel) { removeEvent(evDel.dataset.ev); renderCal(); toast('일정을 지웠어요.'); }
+    else if (editp) openEditEntry(editp.dataset.id);
     else if (del) deleteEntryUI(del.dataset.id);
     else if (add) openCaptureFor(selDate);
   });
+  // 일정 추가 모달
+  $('#event-type-row').addEventListener('click', (e) => {
+    const b = e.target.closest('.chip'); if (!b) return;
+    eventModalType = b.dataset.type;
+    $$('#event-type-row .chip').forEach((x) => x.classList.toggle('on', x === b));
+    const anniv = eventModalType === 'anniv';
+    $('#event-yearly-row').classList.toggle('hidden', !anniv);
+    $('#event-yearly').checked = anniv; // 기념일은 매년 반복 기본 켬
+  });
+  $('#event-add').onclick = confirmEvent;
+  $('#event-cancel').onclick = closeEventModal;
+  $('#event-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmEvent(); });
+  $('#event-modal').addEventListener('click', (e) => { if (e.target.id === 'event-modal') closeEventModal(); });
   $('#cal-entry-list').addEventListener('change', (e) => {
     const chk = e.target.closest('.cover-chk');
     if (chk) {
@@ -2362,16 +2566,22 @@ function bind() {
   $('#grid-filter-clear').onclick = () => { gridFilterMood = ''; renderGrid(); };
   $('#btn-tidy').onclick = restoreGrid;
 
-  // 브이로그 보관함
+  // 브이로그 보관함 — 타일 누르면 큰 화면 뷰어
   $('#btn-new-vlog').onclick = () => openSub('scr-vlog');
   $('#vloglib-wrap').addEventListener('click', (e) => {
-    const play = e.target.closest('.vlog-play-btn');
-    const dl = e.target.closest('.vlog-dl-btn');
-    const del = e.target.closest('.vlog-del-btn');
-    if (play) playVlogRec(play.dataset.id);
-    else if (dl) downloadVlogRec(dl.dataset.id);
-    else if (del) deleteVlog(del.dataset.id);
+    const tile = e.target.closest('.vlog-tile');
+    if (tile) openVlogViewer(tile.dataset.id);
   });
+  // 브이로그 뷰어(큰 화면): 저장 / 삭제 / 닫기
+  $('#vlog-viewer-dl').onclick = () => { if (viewerVlogId) downloadVlogRec(viewerVlogId); };
+  $('#vlog-viewer-del').onclick = async () => {
+    const id = viewerVlogId;
+    if (!id) return;
+    closeVlogViewer();
+    await deleteVlog(id);
+  };
+  $('#vlog-viewer-close').onclick = closeVlogViewer;
+  $('#vlog-viewer').addEventListener('click', (e) => { if (e.target.id === 'vlog-viewer') closeVlogViewer(); });
 
   // 하위 화면 돌아가기 (수정 취소 포함)
   $('#btn-cap-back').onclick = () => { editId = null; $('#cap-edit-banner').classList.add('hidden'); show(backTo); };
@@ -2471,11 +2681,20 @@ function bind() {
 
   // 설정: 일기장 관리 (열기 / 이름 바꾸기 / 삭제 / 새로 만들기)
   $('#btn-new-diary').onclick = () => openNewDiary();
+  $('#diary-cover-input').onchange = async (e) => {
+    const file = e.target.files[0];
+    if (file && coverTargetId) await setDiaryCover(coverTargetId, file);
+    e.target.value = ''; coverTargetId = '';
+  };
   $('#diary-list').addEventListener('click', async (e) => {
     const open = e.target.closest('[data-open]');
     const rn = e.target.closest('[data-rn]');
     const save = e.target.closest('[data-save]');
     const del = e.target.closest('[data-del]');
+    const cover = e.target.closest('[data-cover]');
+    const coverClear = e.target.closest('[data-coverclear]');
+    if (cover) { coverTargetId = cover.dataset.cover; $('#diary-cover-input').click(); return; }
+    if (coverClear) { clearDiaryCover(coverClear.dataset.coverclear); return; }
     if (open) { openDiary(open.dataset.open); return; }
     if (rn) {
       const item = rn.closest('.diary-item');
@@ -2709,6 +2928,16 @@ window.__diary = {
   },
   // 여러 일기장(책장) 훅
   getDiaries: loadDiaries, activeDiaryId, addDiary, renameDiary, removeDiary,
+  // 표지 사진 (테스트: dataURL 직접 지정)
+  setDiaryCoverData: (id, dataURL) => { const a = loadDiaries(); const d = a.find((x) => x.id === id); if (d) { d.cover = dataURL; saveDiaries(a); renderShelf(); renderDiaryList(); } },
+  getDiaryCover: (id) => { const d = loadDiaries().find((x) => x.id === id); return d ? (d.cover || null) : null; },
+  clearDiaryCover,
+  // 일정·기념일
+  getEvents: loadEvents, addEvent: (date, title, type, yearly) => { addEvent(date, title, type, yearly); if (curScreen === 'scr-cal') renderCal(); },
+  removeEvent: (id) => { removeEvent(id); if (curScreen === 'scr-cal') renderCal(); },
+  eventsOnDate, upcomingEvents, ddayLabel, openEventModal, nextOccurrence,
+  // 브이로그 뷰어·확장자
+  openVlogViewer, closeVlogViewer, viewerVlogId: () => viewerVlogId, extForType, pickMime,
   openDiary, renderShelf,
   ensureDiary: async (topic = 'daily', name = '') => {
     if (activeDiaryId() && loadDiaries().some((d) => d.id === activeDiaryId())) return activeDiaryId();

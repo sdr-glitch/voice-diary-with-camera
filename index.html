@@ -28,6 +28,7 @@
 <!-- ============ 달력 (홈) ============ -->
 <section id="scr-cal" class="screen hidden tabscr">
   <header class="top-bar"><h1 class="app-title" id="cal-home-title">순간일기</h1></header>
+  <div class="upcoming hidden" id="upcoming"></div>
   <div class="cal-screen-card">
     <div class="cal-head">
       <button class="nav-arrow sm" id="cal-prev" aria-label="이전 달">◀</button>
@@ -262,8 +263,9 @@
   <header class="top-bar"><h1 class="app-title">설정</h1></header>
   <div class="set-card">
     <h2>내 일기장 (책장)</h2>
-    <p>일상·취미·여행처럼 주제별로 일기장을 따로 만들어 써요. 눌러서 열고, 이름을 바꾸거나 지울 수 있어요.</p>
+    <p>일상·취미·여행처럼 주제별로 일기장을 따로 만들어 써요. 눌러서 열고, 이름·표지 사진을 바꾸거나 지울 수 있어요.</p>
     <div id="diary-list"></div>
+    <input type="file" id="diary-cover-input" accept="image/*" class="hidden">
     <button class="tbtn primary" id="btn-new-diary">＋ 새 일기장 만들기</button>
   </div>
   <div class="set-card">
@@ -384,6 +386,36 @@
   <div class="reminder-btns">
     <button class="tbtn primary" id="reminder-go">기록하기</button>
     <button class="tbtn" id="reminder-dismiss">닫기</button>
+  </div>
+</div>
+
+<!-- 브이로그 큰 화면 뷰어 -->
+<div id="vlog-viewer">
+  <div class="viewer-box">
+    <video id="vlog-viewer-video" playsinline controls></video>
+    <div class="viewer-title" id="vlog-viewer-title"></div>
+    <div class="viewer-btns">
+      <button class="tbtn primary" id="vlog-viewer-dl">기기에 저장</button>
+      <button class="tbtn danger" id="vlog-viewer-del">삭제</button>
+      <button class="tbtn" id="vlog-viewer-close">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 일정·기념일 추가 모달 -->
+<div id="event-modal">
+  <div class="modal-box">
+    <p class="event-modal-date" id="event-modal-date"></p>
+    <div class="event-type-row" id="event-type-row">
+      <button class="chip on" data-type="plan">일정</button>
+      <button class="chip" data-type="anniv">기념일</button>
+    </div>
+    <input type="text" id="event-title" maxlength="30" placeholder="무슨 일정인가요? (예: 여행, 시험, 결혼기념일)">
+    <label class="lbl set-toggle" id="event-yearly-row"><input type="checkbox" id="event-yearly"> 매년 반복 (기념일)</label>
+    <div class="modal-btns">
+      <button class="tbtn" id="event-cancel">취소</button>
+      <button class="tbtn primary" id="event-add">추가하기</button>
+    </div>
   </div>
 </div>
 

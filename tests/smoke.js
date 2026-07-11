@@ -454,10 +454,13 @@ function ok(cond, name) {
   await page.waitForSelector('#scr-vloglib:not(.hidden)');
   let vl = await page.evaluate(() => window.__diary.getVlogs());
   ok(vl.length === 1 && vl[0].size > 5000, `브이로그 보관함에 저장 (${vl[0] ? vl[0].size : 0}B)`);
-  ok((await page.$$eval('.vlog-card-item', (n) => n.length)) === 1, '보관함 카드 표시');
-  // 재생(인라인 video로 교체)
-  await page.click('.vlog-play-btn');
-  ok(await page.isVisible('.vlog-inline-video'), '카드에서 재생(인라인 영상)');
+  ok((await page.$$eval('.vlog-tile', (n) => n.length)) === 1, '보관함 바둑판 타일 표시');
+  // 타일 누르면 큰 화면 뷰어
+  await page.click('.vlog-tile');
+  ok(await page.isVisible('#vlog-viewer.on'), '타일 누르면 큰 화면 뷰어 열림');
+  ok(await page.evaluate(() => !!document.getElementById('vlog-viewer-video').src), '뷰어에 영상 로드');
+  await page.click('#vlog-viewer-close');
+  ok(!(await page.isVisible('#vlog-viewer.on')), '뷰어 닫기');
   // 새로고침 후 유지
   await page.reload();
   await page.evaluate(() => window.__diary.ready());
@@ -467,6 +470,11 @@ function ok(cond, name) {
   await page.evaluate((id) => window.__diary.deleteVlogNow(id), vl[0].id);
   vl = await page.evaluate(() => window.__diary.getVlogs());
   ok(vl.length === 0, '브이로그 삭제');
+
+  console.log('\n[25b] 브이로그 파일 형식 — 재생 가능한 확장자(mp4 우선)');
+  const mimeInfo = await page.evaluate(() => ({ mime: window.__diary.pickMime(), mp4: window.__diary.extForType('video/mp4'), webm: window.__diary.extForType('video/webm;codecs=vp9') }));
+  ok(mimeInfo.mp4 === 'mp4' && mimeInfo.webm === 'webm', '실제 형식에 맞는 확장자 선택(mp4/webm)');
+  ok(mimeInfo.mime && (mimeInfo.mime.includes('mp4') || mimeInfo.mime.includes('webm')), `녹화 형식 지원 (${mimeInfo.mime})`);
 
   console.log('\n[26] 흰색 책 디자인 확인');
   const coverBg = await page.evaluate(async () => {
@@ -680,6 +688,64 @@ function ok(cond, name) {
   await page.evaluate(() => window.__diary.selectDate('2026-07-06'));
   await page.waitForTimeout(120);
   ok(await page.$('#cal-entry-list .pg-media.polaroid .masking-tape') !== null, '사진 위 마스킹 테이프 요소 존재');
+
+  console.log('\n[35] 다이어리 표지 사진 설정');
+  await page.evaluate(() => window.__diary.show('scr-settings'));
+  const did = await page.evaluate(() => window.__diary.activeDiaryId());
+  await page.evaluate((png) => window.__diary.setDiaryCoverData(window.__diary.activeDiaryId(), png), PNG);
+  ok((await page.evaluate((id) => window.__diary.getDiaryCover(id), did)) !== null, '표지 사진 저장');
+  await page.evaluate(() => window.__diary.show('scr-cover'));
+  await page.evaluate(() => window.__diary.renderShelf());
+  await page.waitForTimeout(60);
+  ok(await page.$(`.book-tile.has-cover[data-id="${did}"]`) !== null, '책장 책에 표지 사진 적용');
+  // 없애기
+  await page.evaluate((id) => window.__diary.clearDiaryCover(id), did);
+  ok((await page.evaluate((id) => window.__diary.getDiaryCover(id), did)) === null, '표지 사진 없애기');
+
+  console.log('\n[36] 달력 일정·기념일 + 다가오는 이벤트');
+  const evInfo = await page.evaluate(() => {
+    const t = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const plus = (n) => { const d = new Date(t); d.setDate(d.getDate() + n); return fmt(d); };
+    window.__diary.addEvent(plus(2), '여행 가는 날', 'plan', false);
+    window.__diary.addEvent(fmt(t), '오늘 기념일', 'anniv', true);
+    const up = window.__diary.upcomingEvents(3);
+    return {
+      today: fmt(t), ym: `${t.getFullYear()}-${pad(t.getMonth() + 1)}`, d2: plus(2),
+      up: up.map((x) => ({ title: x.ev.title, when: x.when })),
+      dday2: window.__diary.ddayLabel(fmt(t), plus(2)),
+      onDate: window.__diary.eventsOnDate(plus(2)).length,
+    };
+  });
+  ok(evInfo.dday2 === 'D-2', `남은 날짜 계산(D-2) — ${evInfo.dday2}`);
+  ok(evInfo.up.length >= 2 && evInfo.up[0].when === evInfo.today, '다가오는 일정 가까운 순 정렬(오늘 먼저)');
+  ok(evInfo.onDate === 1, '특정 날짜 일정 조회');
+  // 달력 UI에 반영
+  await page.evaluate((ym) => window.__diary.goCalendar(ym), evInfo.ym);
+  await page.waitForTimeout(100);
+  ok(await page.isVisible('#upcoming') && (await page.$$eval('#upcoming .up-item', (n) => n.length)) >= 1, '다가오는 일정 배너 표시');
+  ok((await page.$$eval('#cal-grid .ev-dot', (n) => n.length)) >= 1, '일정 있는 날 달력에 점 표시');
+  // 다가오는 배너 클릭 → 그 날짜 선택
+  await page.click('#upcoming .up-item');
+  await page.waitForTimeout(60);
+  ok((await page.textContent('#cal-entry-list .cal-events')).includes('일정·기념일'), '날짜 선택 시 일정 섹션 표시');
+  // 일정 추가 모달로 기념일 추가
+  await page.evaluate((d) => window.__diary.selectDate(d), evInfo.today);
+  await page.waitForTimeout(60);
+  await page.click('#ev-add');
+  ok(await page.isVisible('#event-modal.on'), '일정 추가 모달 열림');
+  await page.click('#event-type-row [data-type="anniv"]');
+  ok(await page.isVisible('#event-yearly-row'), '기념일 선택 시 매년 반복 옵션 표시');
+  await page.fill('#event-title', '결혼기념일');
+  await page.click('#event-add');
+  ok(!(await page.isVisible('#event-modal.on')), '추가 후 모달 닫힘');
+  ok(await page.evaluate(() => window.__diary.getEvents().some((e) => e.title === '결혼기념일' && e.yearly)), '기념일(매년 반복) 저장');
+  // 일정 삭제
+  const evCountBefore = await page.evaluate(() => window.__diary.getEvents().length);
+  await page.click('#cal-entry-list .ev-del');
+  await page.waitForTimeout(60);
+  ok((await page.evaluate(() => window.__diary.getEvents().length)) === evCountBefore - 1, '일정 삭제');
 
   console.log('\n[34] PWA 구성');
   const root = path.resolve(__dirname, '..');
