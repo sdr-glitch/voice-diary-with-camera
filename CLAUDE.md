@@ -16,7 +16,7 @@
 
 ## 화면 흐름
 
-**책장(표지)** = 첫 화면. 일기장(diary)들을 책으로 나열(`renderShelf`, `#shelf`), 책을 누르면 그 일기장을 열고(`openDiary`) → **하단 탭 5개**: 달력(홈)·모아보기·통계·브이로그·설정. '＋' 타일 또는 설정의 '새 일기장'은 `#onboard`(새 일기장 만들기 창)로. `TAB_SCREENS`일 때만 `#bottomnav` 표시·활성 탭 갱신, `FAB_SCREENS`(달력·모아보기)에서 `#fab` 표시. 기록·브이로그 만들기는 탭이 아닌 상세/하위 화면(돌아가기 버튼, `backTo`). 달력의 어느 날짜든 클릭 → 기록 있으면 크게보기, 없으면 기록. '순간일기' 제목은 책장으로.
+**책장(표지)** = 첫 화면. 일기장(diary)들을 책으로 나열(`renderShelf`, `#shelf`), 책을 누르면 그 일기장을 열고(`openDiary`) → **하단 탭 5개**: 달력(홈)·모아보기·통계·브이로그·설정. '＋' 타일 또는 설정의 '새 일기장'은 `#onboard`(새 일기장 만들기 창)로. `TAB_SCREENS`일 때만 `#bottomnav` 표시·활성 탭 갱신, `FAB_SCREENS`(달력·모아보기)에서 `#fab` 표시. 기록·브이로그 만들기는 탭이 아닌 상세/하위 화면(돌아가기 버튼, `backTo`). **달력의 모든 날짜(과거·오늘·미래)를 클릭하면 선택**되어 아래에 일정 섹션 + 크게보기 카드(또는 '이 날 채우기')가 뜸. '순간일기' 제목은 책장으로.
 
 ## 여러 일기장 (책장)
 
@@ -63,8 +63,10 @@
 - **대표 사진**: `momentDiary:covers:<diaryId>`(date→entryId) localStorage. `coversKey()`/`setCover`/`coverEntry`/`isCover`.
 - **영상 형식(호환성)**: `pickMime()`은 **mp4(H.264) 최우선** → webm 최후. webm은 아이폰에서 재생 불가라 반드시 mp4를 우선함. 다운로드 파일명은 `extForType(blob.type)`로 **실제 내용과 확장자 일치**(확장자 불일치로 재생 안 되던 문제 해결). 저장 vlog에 `rec.mime` 보관.
 - **브이로그 보관함**: IndexedDB `vlogs` 스토어(DB v2, `{id,ym,title,createdTs,thumb,blob,mime}`). `saveVlogToLib`(생성 후 `#btn-vlog-keep`), `renderVlogLib`=**바둑판 타일**(`.vlog-tile`), 타일 클릭→`openVlogViewer`(전체화면 `#vlog-viewer`, 저장/삭제/닫기), `VLOG_CAP`개 초과 시 오래된 것 정리.
-- **다이어리 표지 사진**: `diary.cover`=축소(≤640px)·jpeg dataURL. `setDiaryCover(id,file)`/`clearDiaryCover(id)`(설정 일기장 목록), 책 타일 `.has-cover`로 배경+어두운 그라데이션. 없으면 주제색 책등.
-- **일정·기념일**: `momentDiary:events:<diaryId>`=`[{id,date,title,type:plan|anniv,yearly}]`. `loadEvents/addEvent/removeEvent/eventsOnDate/eventDaysInMonth`. 반복 기념일은 월-일 매칭. 달력 셀 `.ev-dot`, 선택 날짜 아래 일정 섹션(`eventsSectionHTML`, `#ev-add`→`#event-modal`), **다가오는 일정 배너**(`renderUpcoming`, `upcomingEvents`/`nextOccurrence`/`ddayLabel`, `#upcoming`). 미래 날짜도 눌러 일정 확인·추가 가능(빈 과거·오늘만 눌러서 기록). 전체 초기화·일기장 삭제 시 events 키도 정리.
+- **다이어리 표지 사진**: `diary.cover`=축소(≤640px)·jpeg dataURL. `setDiaryCover(id,file)`/`clearDiaryCover(id)`(설정 일기장 목록에서 파일 선택). 책 타일 `.has-cover`는 **`background-size: contain`(사진 안 잘림)** + 아래 그라데이션 띠에 글씨. 표지 사진 없으면 주제색 책등. **책등 리본(`.book-band`)은 제거함**(요청).
+- **일정·기념일**: `momentDiary:events:<diaryId>`=`[{id,date,title,type:plan|anniv,yearly}]`. `loadEvents/addEvent/removeEvent/eventsOnDate/eventDaysInMonth`. 반복 기념일은 월-일 매칭. 달력 셀 `.ev-dot`, 선택 날짜 아래 일정 섹션(`eventsSectionHTML`, `#ev-add`→`#event-modal`), **다가오는 일정 배너**(`renderUpcoming`, `upcomingEvents`/`nextOccurrence`/`ddayLabel`, `#upcoming`). **달력의 모든 날짜(과거·오늘·미래)를 눌러 선택** → 일정 추가 또는 '이 날 채우기'로 기록(빈 날 직접 촬영 대신 선택 후 채우기). 전체 초기화·일기장 삭제 시 events 키도 정리.
+- **브이로그 백그라운드 생성**: `makeVlogUI()`는 검증 후 `runVlogBuild()`를 **await 없이** 시작하고 바로 반환 → 다른 화면으로 이동해도 계속 생성(진행 칩 `#vlog-build-chip`이 화면 위에 고정 표시). 완성되면 `persistVlog()`로 **자동 보관함 저장**(중복 방지 `currentVlogSavedId`) + toast + `Notification`. `vlogBuilding` 중복 실행 방지. **주의**: 브라우저는 탭이 완전히 백그라운드/종료되면 rAF·MediaRecorder를 멈추므로 "앱 완전 종료 후에도 생성"은 불가(한계). 생성 시간은 실시간 녹화라 대략 영상 길이만큼.
+- **영상 멈춤(stall) 방지**: `loadVideoBlob`/`blobToImage`에 6초 타임아웃, `tryPlay`는 3초 후 진행 → 한 미디어가 안 열려도 그 장면만 건너뛰고 계속(예전에 영상 로드가 안 끝나 1/4에서 멈추던 버그 해결).
 - localStorage는 `momentDiary:` 접두사 (작은 상태만)
 - 전체 초기화는 IndexedDB 삭제 + `momentDiary:*` 키 삭제 둘 다 필요
 
@@ -75,7 +77,7 @@ NODE_PATH=$(npm root -g) PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node tests/sm
 ```
 
 - headless Chromium + `--use-fake-device-for-media-stream`(가짜 카메라)으로 전 구간 검증
-- **테스트 훅** `window.__diary`: `ready() getEntries() show(id) saveEntry() deleteEntry(id) openEditEntry buildVlog(ym,onProg,{bgm,fx,title,outro,targetSec,ids}) addEntry({...,mood,durMs})(활성 일기장에 저장) camState()(recording 포함) testFilter(name) speechSupported() getFit/setFit getFrame/getTape/setFrame/setTape addSticker/getStickers goCalendar(ym) jumpToEntry(idx) openCaptureFor(date)/getCaptureDate() importFile(file)/setFilter(f) startVideoRec/stopVideoRec/isRecording getClips/moveClip/toggleClip/setTarget fxSample/bubbleSample reminder{on,time,show,schedule} renderPolaroidTest(dataURL) setJiggle/isJiggling/cascadeGrid/restoreGrid/isFallen/fallenPosOf/dragItemBy/gridCount statsCounts(ym) openMoodCollection/gridFilter setCover/coverEntryId saveVlogToLib/getVlogs/deleteVlogNow(id) getTopic/setTopic/allTopics/addCustomTopic/loadCustomTopics getMembers/addMember/setActiveAuthor exportData/importData maybeOnboard/openNewDiary/onboardVisible **getDiaries/activeDiaryId/addDiary/renameDiary/removeDiary/openDiary/renderShelf/ensureDiary setDiaryCoverData/getDiaryCover/clearDiaryCover getEvents/addEvent/removeEvent/eventsOnDate/upcomingEvents/ddayLabel/openEventModal openVlogViewer/closeVlogViewer/pickMime/extForType**`
+- **테스트 훅** `window.__diary`: `ready() getEntries() show(id) saveEntry() deleteEntry(id) openEditEntry buildVlog(ym,onProg,{bgm,fx,title,outro,targetSec,ids}) addEntry({...,mood,durMs})(활성 일기장에 저장) camState()(recording 포함) testFilter(name) speechSupported() getFit/setFit getFrame/getTape/setFrame/setTape addSticker/getStickers goCalendar(ym) jumpToEntry(idx) openCaptureFor(date)/getCaptureDate() importFile(file)/setFilter(f) startVideoRec/stopVideoRec/isRecording getClips/moveClip/toggleClip/setTarget fxSample/bubbleSample reminder{on,time,show,schedule} renderPolaroidTest(dataURL) setJiggle/isJiggling/cascadeGrid/restoreGrid/isFallen/fallenPosOf/dragItemBy/gridCount statsCounts(ym) openMoodCollection/gridFilter setCover/coverEntryId saveVlogToLib/getVlogs/deleteVlogNow(id) getTopic/setTopic/allTopics/addCustomTopic/loadCustomTopics getMembers/addMember/setActiveAuthor exportData/importData maybeOnboard/openNewDiary/onboardVisible **getDiaries/activeDiaryId/addDiary/renameDiary/removeDiary/openDiary/renderShelf/ensureDiary setDiaryCoverData/getDiaryCover/clearDiaryCover getEvents/addEvent/removeEvent/eventsOnDate/upcomingEvents/ddayLabel/openEventModal openVlogViewer/closeVlogViewer/pickMime/extForType/isVlogBuilding/buildChipOn**`
 - 큰 기록은 IndexedDB에 있으므로 localStorage 직접 읽기/시드 금지 — 훅 사용. **일기장 시드**: initScript로 `momentDiary:diaries`+`active`를 심어 온보딩 스킵(전체 삭제 스텝 뒤엔 온보딩에서 새 일기장 하나 만들어 이어감).
 - 음성 받아쓰기는 headless에서 실제 변환 불가 → 안내 문구 + 직접 입력 경로만 검증
 

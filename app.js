@@ -631,7 +631,6 @@ async function renderShelf() {
     const hasCover = !!d.cover;
     const style = hasCover ? ` style="background-image:url('${d.cover}')"` : '';
     return `<button class="book-tile spine-${i % 5} ${d.id === active ? 'cur' : ''}${hasCover ? ' has-cover' : ''}"${style} data-id="${d.id}">
-      <span class="book-band" aria-hidden="true"></span>
       <span class="book-name">${escapeHTML(d.name)}</span>
       <span class="book-topic">${escapeHTML(sub)}</span>
       <span class="book-count">${n ? n + '개의 순간' : '첫 순간을 기다려요'}</span>
@@ -1567,21 +1566,41 @@ function vlogTitleSlide(ctx, W, H, title, sub) {
   ctx.fillText(sub, W / 2, H / 2 + 34);
 }
 function loadVideoBlob(blob) {
+  // 시간 안에 못 열리면 실패 처리 → 그 장면만 건너뛰고 브이로그 계속 (멈춤 방지)
   return new Promise((resolve, reject) => {
     const v = document.createElement('video');
-    v.muted = true; v.playsInline = true;
-    v.src = URL.createObjectURL(blob);
-    v.onloadeddata = () => resolve(v);
-    v.onerror = () => reject(new Error('video load fail'));
+    v.muted = true; v.playsInline = true; v.preload = 'auto';
+    const url = URL.createObjectURL(blob);
+    let done = false;
+    const finish = (ok) => {
+      if (done) return; done = true; clearTimeout(t);
+      if (ok) resolve(v); else { URL.revokeObjectURL(url); reject(new Error('video load timeout/fail')); }
+    };
+    const t = setTimeout(() => finish(false), 6000);
+    v.onloadeddata = () => finish(true);
+    v.oncanplay = () => finish(true);
+    v.onerror = () => finish(false);
+    v.src = url;
+    v.load();
   });
 }
 function blobToImage(blobOrDataURL) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('img load fail'));
-    img.src = typeof blobOrDataURL === 'string' ? blobOrDataURL : URL.createObjectURL(blobOrDataURL);
+    let done = false;
+    const url = typeof blobOrDataURL === 'string' ? blobOrDataURL : URL.createObjectURL(blobOrDataURL);
+    const t = setTimeout(() => { if (!done) { done = true; reject(new Error('img load timeout')); } }, 6000);
+    img.onload = () => { if (!done) { done = true; clearTimeout(t); resolve(img); } };
+    img.onerror = () => { if (!done) { done = true; clearTimeout(t); reject(new Error('img load fail')); } };
+    img.src = url;
   });
+}
+/** 재생 시도 — 막히면 3초 후 그냥 진행 (정지 프레임이라도 녹화됨) */
+function tryPlay(v) {
+  return Promise.race([
+    v.play().catch(() => {}),
+    new Promise((r) => setTimeout(r, 3000)),
+  ]);
 }
 
 async function buildVlog(ym, onProg = () => {}, opts = {}) {
@@ -1682,7 +1701,7 @@ async function buildVlog(ym, onProg = () => {}, opts = {}) {
         // 영상은 길이가 제각각 — 배정된 시간(slotMs)만큼만 보여주고 넘어감(압축)
         const v = await loadVideoBlob(e.blob);
         v.loop = true;
-        await v.play().catch(() => {});
+        await tryPlay(v);
         drawFn = () => {
           drawPolaroidFrame(ctx, W, H, geo);
           drawMediaCover(ctx, v, v.videoWidth || 4, v.videoHeight || 3, geo, 1);
@@ -1738,46 +1757,81 @@ async function buildVlog(ym, onProg = () => {}, opts = {}) {
 }
 
 let vlogBlob = null;
-async function makeVlogUI() {
+let vlogBuilding = false;         // 지금 브이로그를 만들고 있는지
+let currentVlogSavedId = '';      // 방금 만든 브이로그가 보관함에 저장됐으면 그 id
+
+/* 만드는 동안 화면을 옮겨다녀도 계속 보이는 진행 표시 칩 */
+function showBuildChip(pct, msg, done) {
+  const c = $('#vlog-build-chip'); if (!c) return;
+  c.classList.add('on'); c.classList.toggle('done', !!done);
+  $('#vbc-bar').style.width = pct + '%';
+  $('#vbc-text').textContent = done ? msg : `브이로그 만드는 중… ${pct}%`;
+}
+function hideBuildChip() { const c = $('#vlog-build-chip'); if (c) c.classList.remove('on'); }
+function requestNotifyPermission() {
+  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {}); } catch (e) {}
+}
+function notifyDone(title, body) {
+  try { if ('Notification' in window && Notification.permission === 'granted') new Notification(title, { body, icon: 'icon-192.png' }); } catch (e) {}
+}
+
+/** 만들기 버튼 — 검증 후 백그라운드 생성을 시작하고 바로 반환(다른 화면으로 이동 가능) */
+function makeVlogUI() {
+  if (vlogBuilding) { toast('이미 브이로그를 만들고 있어요. 다 되면 알려드릴게요. 그동안 다른 일 보셔도 돼요.'); return; }
   const ym = $('#vlog-month').value;
   if (!ym) { toast('아직 기록이 없어요. 먼저 순간을 담아보세요!'); return; }
-  const prog = $('#vlog-progress'), bar = $('#vlog-bar'), stepEl = $('#vlog-step');
-  $('#vlog-result').classList.remove('on');
-  prog.classList.add('on');
   const ids = vlogClips.filter((c) => c.on).map((c) => c.id);
   if (!ids.length) { toast('브이로그에 넣을 장면을 하나 이상 골라주세요.'); return; }
+  const outro = $('#vlog-outro').value;
+  localStorage.setItem(LS_PREFIX + 'outro', outro); // 다음에도 기억
+  const opts = { bgm: $('#vlog-bgm').value, fx: $('#vlog-fx').checked, title: $('#vlog-title').value, outro, targetSec: vlogTargetSec, ids };
+  runVlogBuild(ym, opts, { ym, title: $('#vlog-title').value, ids });
+  toast('브이로그를 만들기 시작했어요. 다른 화면으로 옮겨 새 일기를 써도 계속 만들어져요.');
+}
+
+/** 실제 생성 — await 하지 않고 백그라운드로 돌린다(완성되면 자동 저장 + 알림) */
+async function runVlogBuild(ym, opts, meta) {
+  vlogBuilding = true;
+  currentVlogSavedId = '';
+  lastVlogMeta = meta;
   $('#btn-make-vlog').disabled = true;
+  $('#vlog-result').classList.remove('on');
+  $('#vlog-progress').classList.add('on');
+  requestNotifyPermission();
+  showBuildChip(0, '');
+  const onProg = (done, total, msg) => {
+    const pct = Math.round((done / total) * 100);
+    $('#vlog-bar').style.width = pct + '%';
+    $('#vlog-step').textContent = msg;
+    showBuildChip(pct, msg);
+  };
   try {
-    const outro = $('#vlog-outro').value;
-    localStorage.setItem(LS_PREFIX + 'outro', outro); // 다음에도 기억
-    const opts = {
-      bgm: $('#vlog-bgm').value,
-      fx: $('#vlog-fx').checked,
-      title: $('#vlog-title').value,
-      outro,
-      targetSec: vlogTargetSec,
-      ids,
-    };
-    lastVlogMeta = { ym, title: $('#vlog-title').value, ids };
-    vlogBlob = await buildVlog(ym, (done, total, msg) => {
-      bar.style.width = Math.round((done / total) * 100) + '%';
-      stepEl.textContent = msg;
-    }, opts);
-    bar.style.width = '100%';
-    stepEl.textContent = '완성!';
+    vlogBlob = await buildVlog(ym, onProg, opts);
+    await persistVlog();                       // 먼저 보관함에 자동 저장(중복 방지)
+    $('#vlog-bar').style.width = '100%';
+    $('#vlog-step').textContent = '완성!';
     const v = $('#vlog-video');
     if (v.src) URL.revokeObjectURL(v.src);
     v.src = URL.createObjectURL(vlogBlob);
     $('#vlog-result').classList.add('on');
+    showBuildChip(100, '브이로그 완성 · 보관함에 저장했어요', true);
+    setTimeout(hideBuildChip, 4500);
+    toast('브이로그가 완성돼 보관함에 저장됐어요.');
+    notifyDone('브이로그 완성', `${meta.title || (ym.replace('-', '년 ') + '월')} 브이로그가 완성돼 보관함에 저장됐어요.`);
+    if (curScreen === 'scr-vloglib') renderVlogLib();
   } catch (err) {
-    stepEl.textContent = '';
-    prog.classList.remove('on');
+    $('#vlog-step').textContent = '';
+    $('#vlog-progress').classList.remove('on');
+    hideBuildChip();
     toast(err.message === 'no-recorder'
       ? '이 브라우저는 영상 만들기를 지원하지 않아요. 크롬/엣지에서 열어보세요.'
       : err.message === 'no-user-audio'
         ? '먼저 아래에서 내 음원 파일을 골라주세요.'
-        : '영상을 만들다 문제가 생겼어요. 다시 한 번 눌러보세요.');
+        : err.message === 'empty-month'
+          ? '넣을 사진·영상이 없어요. 장면을 하나 이상 골라주세요.'
+          : '영상을 만들다 문제가 생겼어요. 다시 한 번 눌러보세요.');
   }
+  vlogBuilding = false;
   $('#btn-make-vlog').disabled = false;
 }
 function downloadVlog() {
@@ -1802,14 +1856,16 @@ async function loadVlogs() {
   vlogs = await vlogAll();
   vlogs.sort((a, b) => b.createdTs - a.createdTs);
 }
-async function saveVlogToLib() {
-  if (!vlogBlob || !lastVlogMeta) { toast('먼저 브이로그를 만들어 주세요.'); return; }
+/** 보관함에 저장 (중복 방지 — 이미 저장됐으면 그대로 둠) */
+async function persistVlog() {
+  if (!vlogBlob || !lastVlogMeta || currentVlogSavedId) return currentVlogSavedId;
   const first = entries.find((e) => (lastVlogMeta.ids || []).includes(e.id));
   const rec = {
     id: uid(), ym: lastVlogMeta.ym, title: lastVlogMeta.title || `${lastVlogMeta.ym.replace('-', '년 ')}월`,
     createdTs: Date.now(), thumb: first ? first.thumb : null, blob: vlogBlob, mime: vlogBlob.type,
   };
   await vlogPut(rec);
+  currentVlogSavedId = rec.id;
   await loadVlogs();
   // 보관 개수 제한 — 오래된 것부터 정리
   while (vlogs.length > VLOG_CAP) {
@@ -1817,7 +1873,13 @@ async function saveVlogToLib() {
     await vlogDelete(old.id);
     const u = vlogURLCache.get(old.id); if (u) { URL.revokeObjectURL(u); vlogURLCache.delete(old.id); }
   }
-  toast('브이로그 보관함에 저장했어요.');
+  return rec.id;
+}
+async function saveVlogToLib() {
+  if (!vlogBlob || !lastVlogMeta) { toast('먼저 브이로그를 만들어 주세요.'); return; }
+  const already = !!currentVlogSavedId;
+  await persistVlog();
+  toast(already ? '이미 보관함에 저장돼 있어요.' : '브이로그 보관함에 저장했어요.');
   show('scr-vloglib');
 }
 async function deleteVlog(id) {
@@ -2154,11 +2216,9 @@ function renderCal() {
       } else {
         html += `<button class="cal-day has${cls}" data-date="${ds}">${d}<i></i>${evDot}</button>`;
       }
-    } else if (isFuture) {
-      // 미래라도 일정이 있으면 눌러서 볼 수 있게
-      html += `<button class="cal-day future${cls}" data-date="${ds}">${d}${evDot}</button>`;
     } else {
-      html += `<button class="cal-day empty${cls}" data-date="${ds}">${d}${evDot}</button>`;
+      // 기록 없는 날(과거·오늘·미래) — 전부 눌러서 선택 가능(일정·기념일 등록 위해)
+      html += `<button class="cal-day empty${isFuture ? ' future' : ''}${cls}" data-date="${ds}">${d}${evDot}</button>`;
     }
   }
   $('#cal-grid').innerHTML = html;
@@ -2498,13 +2558,10 @@ function bind() {
   $('#cal-grid').addEventListener('click', (e) => {
     const day = e.target.closest('.cal-day');
     if (!day || !day.dataset.date) return;
-    if (day.classList.contains('empty')) {
-      openCaptureFor(day.dataset.date); // 빈 과거·오늘 → 그날 채우기
-    } else {
-      // 기록 있는 날 / 미래(일정 확인·추가) → 선택해서 아래에 표시
-      selDate = day.dataset.date;
-      renderCal();
-    }
+    // 어느 날짜든 눌러서 선택 → 아래에서 일정·기념일을 등록하거나 그날을 채운다
+    selDate = day.dataset.date;
+    renderCal();
+    $('#cal-entry-list').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
   // 다가오는 일정 배너 → 그 날짜로 이동
   $('#upcoming').addEventListener('click', (e) => {
@@ -2565,6 +2622,12 @@ function bind() {
   bindGrid();
   $('#grid-filter-clear').onclick = () => { gridFilterMood = ''; renderGrid(); };
   $('#btn-tidy').onclick = restoreGrid;
+
+  // 브이로그 진행 칩 — 누르면 완성 전엔 만들기 화면, 완성 후엔 보관함으로
+  $('#vlog-build-chip').onclick = () => {
+    if ($('#vlog-build-chip').classList.contains('done')) show('scr-vloglib');
+    else openSub('scr-vlog');
+  };
 
   // 브이로그 보관함 — 타일 누르면 큰 화면 뷰어
   $('#btn-new-vlog').onclick = () => openSub('scr-vlog');
@@ -2936,8 +2999,9 @@ window.__diary = {
   getEvents: loadEvents, addEvent: (date, title, type, yearly) => { addEvent(date, title, type, yearly); if (curScreen === 'scr-cal') renderCal(); },
   removeEvent: (id) => { removeEvent(id); if (curScreen === 'scr-cal') renderCal(); },
   eventsOnDate, upcomingEvents, ddayLabel, openEventModal, nextOccurrence,
-  // 브이로그 뷰어·확장자
+  // 브이로그 뷰어·확장자·백그라운드 생성
   openVlogViewer, closeVlogViewer, viewerVlogId: () => viewerVlogId, extForType, pickMime,
+  isVlogBuilding: () => vlogBuilding, buildChipOn: () => $('#vlog-build-chip').classList.contains('on'),
   openDiary, renderShelf,
   ensureDiary: async (topic = 'daily', name = '') => {
     if (activeDiaryId() && loadDiaries().some((d) => d.id === activeDiaryId())) return activeDiaryId();

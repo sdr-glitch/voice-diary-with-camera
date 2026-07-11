@@ -62,10 +62,13 @@ function ok(cond, name) {
   await page.click('.book-tile[data-id="d_seed"]');
   await page.waitForSelector('#scr-cal:not(.hidden)');
 
-  console.log('\n[4] 오늘 날짜 클릭 → 오늘의 순간 담기');
+  console.log('\n[4] 오늘 날짜 클릭 → 선택 → 이 날 채우기');
   ok(await page.$('.cal-day.today') !== null, '오늘 날짜 강조 표시');
   await page.click('.cal-day.today');
-  ok(await page.isVisible('#scr-capture'), '오늘 누르면 기록 화면으로');
+  ok(await page.isVisible('#scr-cal'), '오늘 누르면 선택(달력 유지)');
+  ok(await page.$('#cal-entry-list .cal-events') !== null, '선택 날짜에 일정 섹션 표시');
+  await page.click('#be-add');
+  ok(await page.isVisible('#scr-capture'), "'이 날 채우기' → 기록 화면으로");
   const capText = await page.textContent('.cap-head');
   ok(noEmoji(capText), '기록 화면 제목에 이모티콘 없음');
   await page.click('#btn-cap-back');
@@ -86,10 +89,12 @@ function ok(cond, name) {
   // 필터끼리 서로 다름(겹치지 않음)
   ok(diff(f.vintage.q1, f.film.q1) > 8 && diff(f.vintage.q1, f.mono.q1) > 8, '빈티지·필름·흑백이 서로 다름');
 
-  console.log('\n[6] 빈 날 클릭 → 기록 화면');
+  console.log('\n[6] 빈 날 클릭 → 선택 → 이 날 채우기');
   await page.evaluate(() => window.__diary.goCalendar('2026-07'));
   await page.click('.cal-day.empty[data-date="2026-07-01"]');
-  ok(await page.isVisible('#scr-capture'), '빈 날 누르면 기록 화면으로');
+  ok(await page.evaluate(() => window.__diary.getSelDate()) === '2026-07-01', '빈 날 누르면 그 날짜 선택');
+  await page.click('#be-add');
+  ok(await page.isVisible('#scr-capture'), "'이 날 채우기' → 기록 화면으로");
   await page.click('#btn-cap-back');
 
   console.log('\n[7] 사진 촬영 + 기분/날씨 + 저장 (기본은 영상 → 사진으로 전환)');
@@ -271,10 +276,12 @@ function ok(cond, name) {
   console.log('\n[16] 달력에서 지난 날 채우기 (아무 날짜나 클릭)');
   await page.evaluate(() => window.__diary.goCalendar('2026-05'));
   ok(await page.isVisible('#scr-cal'), '5월 달력 표시');
-  ok((await page.$$eval('.cal-day.empty', (n) => n.length)) > 0, '지난 날들이 눌러서 채울 수 있게 표시');
+  ok((await page.$$eval('.cal-day.empty', (n) => n.length)) > 0, '지난 날들이 눌러서 선택할 수 있게 표시');
   ok((await page.$$eval('.cal-day.future', (n) => n.length)) === 0, '(과거 달이라 미래 칸 없음)');
   await page.click('.cal-day.empty[data-date="2026-05-10"]');
-  ok(await page.isVisible('#scr-capture'), '지난 날 누르면 기록 화면으로');
+  ok(await page.evaluate(() => window.__diary.getSelDate()) === '2026-05-10', '지난 날 누르면 선택');
+  await page.click('#be-add');
+  ok(await page.isVisible('#scr-capture'), "'이 날 채우기' → 기록 화면으로");
   ok((await page.textContent('#cap-datebar')).includes('5월 10일'), '기록 화면이 그날짜를 표시');
   ok(await page.evaluate(() => window.__diary.getCaptureDate()) === '2026-05-10', 'captureDate가 지난 날로 설정');
   await page.fill('#diary-text', '오월의 지난 날을 채웠다.');
@@ -448,12 +455,23 @@ function ok(cond, name) {
   ok(clipDates.includes('7월 7일'), '영상 있는 날은 포함');
   await page.fill('#vlog-title', '칠월 기록');
   await page.click('#btn-make-vlog');
+  // 백그라운드 생성 — 클릭 직후 바로 만들기 시작(화면 안 막힘) + 진행 칩 표시
+  ok(await page.evaluate(() => window.__diary.isVlogBuilding()), '만들기 누르면 바로 백그라운드 생성 시작');
+  ok(await page.evaluate(() => window.__diary.buildChipOn()), '진행 칩 표시(화면 이동해도 보임)');
+  // 만드는 동안 다른 화면으로 이동해도 계속 진행
+  await page.evaluate(() => window.__diary.show('scr-cal'));
+  ok(await page.evaluate(() => window.__diary.buildChipOn()), '다른 화면으로 옮겨도 진행 칩 유지');
+  await page.evaluate(() => window.__diary.show('scr-vlog'));
   await page.waitForSelector('#vlog-result.on', { timeout: 40000 });
+  ok(!(await page.evaluate(() => window.__diary.isVlogBuilding())), '완성되면 생성 상태 해제');
+  let vl = await page.evaluate(() => window.__diary.getVlogs());
+  ok(vl.length === 1 && vl[0].size > 5000, `완성 시 자동으로 보관함에 저장 (${vl[0] ? vl[0].size : 0}B)`);
+  // 이미 저장됐으니 '보관함에 저장'을 눌러도 중복되지 않음
   ok(await page.isVisible('#btn-vlog-keep'), '보관함 저장 버튼 표시');
   await page.click('#btn-vlog-keep');
   await page.waitForSelector('#scr-vloglib:not(.hidden)');
-  let vl = await page.evaluate(() => window.__diary.getVlogs());
-  ok(vl.length === 1 && vl[0].size > 5000, `브이로그 보관함에 저장 (${vl[0] ? vl[0].size : 0}B)`);
+  vl = await page.evaluate(() => window.__diary.getVlogs());
+  ok(vl.length === 1, '중복 저장 안 됨(자동 저장 1개 유지)');
   ok((await page.$$eval('.vlog-tile', (n) => n.length)) === 1, '보관함 바둑판 타일 표시');
   // 타일 누르면 큰 화면 뷰어
   await page.click('.vlog-tile');
@@ -698,6 +716,9 @@ function ok(cond, name) {
   await page.evaluate(() => window.__diary.renderShelf());
   await page.waitForTimeout(60);
   ok(await page.$(`.book-tile.has-cover[data-id="${did}"]`) !== null, '책장 책에 표지 사진 적용');
+  ok(await page.$('.book-band') === null, '책 표지 오른쪽 갈색 줄(밴드) 제거됨');
+  const coverSize = await page.evaluate((id) => getComputedStyle(document.querySelector(`.book-tile.has-cover[data-id="${id}"]`)).backgroundSize, did);
+  ok(coverSize.includes('contain'), `표지 사진이 잘리지 않게 표시(contain) — ${coverSize}`);
   // 없애기
   await page.evaluate((id) => window.__diary.clearDiaryCover(id), did);
   ok((await page.evaluate((id) => window.__diary.getDiaryCover(id), did)) === null, '표지 사진 없애기');
@@ -746,6 +767,22 @@ function ok(cond, name) {
   await page.click('#cal-entry-list .ev-del');
   await page.waitForTimeout(60);
   ok((await page.evaluate(() => window.__diary.getEvents().length)) === evCountBefore - 1, '일정 삭제');
+
+  console.log('\n[36b] 미래 달·미래 날짜도 활성화되어 일정 등록 가능');
+  // 다음 달(전부 미래)로 이동해서 미래 날짜 클릭 → 선택 + 일정 섹션
+  const nextYm = await page.evaluate(() => {
+    const t = new Date(); const d = new Date(t.getFullYear(), t.getMonth() + 1, 15);
+    const pad = (n) => String(n).padStart(2, '0');
+    return { ym: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`, day: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-15` };
+  });
+  await page.evaluate((ym) => window.__diary.goCalendar(ym), nextYm.ym);
+  await page.waitForTimeout(80);
+  ok((await page.$$eval('#cal-grid .cal-day.future', (n) => n.length)) > 0, '미래 날짜가 눌러서 선택 가능한 버튼으로 표시');
+  ok(await page.$(`.cal-day[data-date="${nextYm.day}"]`) !== null, '미래 날짜 셀 존재');
+  await page.click(`.cal-day[data-date="${nextYm.day}"]`);
+  await page.waitForTimeout(60);
+  ok(await page.evaluate(() => window.__diary.getSelDate()) === nextYm.day, '미래 날짜 눌러서 선택됨');
+  ok(await page.$('#cal-entry-list .cal-events #ev-add') !== null, '미래 날짜에도 일정 추가 버튼 표시');
 
   console.log('\n[34] PWA 구성');
   const root = path.resolve(__dirname, '..');

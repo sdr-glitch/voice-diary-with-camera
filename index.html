@@ -216,11 +216,12 @@
       <div class="vlog-audio-row">
         <span class="lbl">전체 길이</span>
         <div class="mode-toggle" id="vlog-len">
-          <button data-len="30">30초</button>
-          <button data-len="60" class="on">1분</button>
-          <button data-len="90">1분 30초</button>
+          <button data-len="30">짧게<small>약 30초</small></button>
+          <button data-len="60" class="on">보통<small>약 1분 · 추천</small></button>
+          <button data-len="90">길게<small>약 1분 30초</small></button>
         </div>
       </div>
+      <span class="lbl len-note">만드는 시간은 대략 영상 길이만큼 걸려요(장면이 많을수록 조금 더). 만드는 동안 <b>다른 화면으로 옮겨 새 일기를 써도 계속 만들어지고</b>, 완성되면 보관함에 저장하고 알려드려요.</span>
       <span class="lbl">넣을 장면 (끌어서 순서를 바꿀 수 있어요 · 체크를 풀면 빠져요)</span>
       <ul class="clip-list" id="clip-list"></ul>
     </div>
@@ -379,6 +380,15 @@
 
 <!-- 오늘의 순간 담기 (플로팅) — 달력·모아보기·책에서 표시 -->
 <button id="fab" class="fab hidden" aria-label="오늘의 순간 담기">＋</button>
+
+<!-- 브이로그 생성 진행 칩 (화면 이동해도 계속 보임) -->
+<button id="vlog-build-chip" aria-label="브이로그 진행 상황 보기">
+  <span class="vbc-spinner" aria-hidden="true"></span>
+  <span class="vbc-body">
+    <span id="vbc-text"></span>
+    <span class="vbc-bar-wrap"><span id="vbc-bar"></span></span>
+  </span>
+</button>
 
 <!-- 기록 알림 배너 -->
 <div id="reminder-banner">
